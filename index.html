@@ -149,7 +149,7 @@ button{cursor:pointer;font-family:inherit}
 .cl-dd-del:hover{background:#FEF2F2}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:none;align-items:center;justify-content:center}
 .modal-bg.open{display:flex}
-.modal{background:#fff;border-radius:12px;padding:20px;width:360px;max-width:94vw;max-height:85vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.18)}
+.modal{background:#fff;border-radius:12px;padding:20px;width:680px;max-width:96vw;max-height:88vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.18)}
 .modal-title{font-size:15px;font-weight:700;margin-bottom:2px}
 .modal-sub{font-size:12px;color:#6B7280;margin-bottom:13px}
 .fg{margin-bottom:10px}
@@ -2054,66 +2054,42 @@ function openFiche(id){
     +'<label class="fl" style="font-size:11px;font-weight:600;color:#374151">'+label+'</label>'
     +'<input class="fi" type="'+(type||'text')+'" id="fi-'+key+'" value="'+(f[key]||'')+'" placeholder="'+(placeholder||'')+'" style="font-size:12px">'
     +'</div>';
+  const G2='display:grid;gap:6px 16px;margin-bottom:6px';
+  const sec=(t)=>'<div style="height:1px;background:#E5E7EB;margin:12px 0 8px"></div>'
+    +'<div style="font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">'+t+'</div>';
+  const row2=(a,b)=>'<div style="'+G2+';grid-template-columns:1fr 1fr">'+a+b+'</div>';
+  const row3=(a,b,dd)=>'<div style="'+G2+';grid-template-columns:1fr 1fr 1fr">'+a+b+dd+'</div>';
+
   const body=
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Nom','nom','text','Nom de famille')
-    +field('Prénom','prenom','text','Prénom')
-    +'</div>'
-    +field('Date de naissance','dateNaissance','date','')
-    +field('Adresse','adresse','text','Rue, numéro...')
-    +field('Complément d&apos;adresse','adresse2','text','Bât, étage, lieu-dit...')
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Code postal','cp','text','75000')
-    +field('Ville','ville','text','Paris')
-    +'</div>'
-    +field('Email','email','email','contact@...')
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Téléphone fixe','telFixe','tel','+33...')
-    +field('Mobile','mobile','tel','+33...')
-    +'</div>'
-    +'<div style="height:1px;background:#E5E7EB;margin:10px 0"></div>'
-    +'<div style="font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;margin-bottom:8px;letter-spacing:.5px">Informations administratives</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('N° Sécurité sociale','numSS','text','1 85 ...')
-    +field('N° Carte vitale','numCV','text','')
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Date expiration CV','dateCVExp','date','')
-    +field('Date expiration SS','dateSSExp','date','')
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('N° Permis de conduire','numPermis','text','')
-    +field('Catégorie permis','catPermis','text','C, CE...')
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Date expiration permis','datePermis','date','')
-    +field('Nationalité','nationalite','text','Française')
-    +'</div>'
-    +'<div style="height:1px;background:#E5E7EB;margin:10px 0"></div>'
-    +'<div style="font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;margin-bottom:8px;letter-spacing:.5px">Contrat de travail</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Statut','statut','text','CDI, CDD, Intérim...')
-    +field('Date début contrat','dateContrat','date','')
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Date fin contrat (CDD)','dateContratFin','date','')
-    +field('Visite médicale','dateMedical','date','')
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Poste','poste','text','Chauffeur PL')
-    +field('Temps de travail','tempsTravail','text','Temps plein')
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('N° Employé','numEmploye','text','EMP-001')
-    +field('IBAN','iban','text','FR76...')
-    +'</div>'
-    +'<div style="height:1px;background:#E5E7EB;margin:10px 0"></div>'
-    +'<div style="font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;margin-bottom:8px;letter-spacing:.5px">Contact d&apos;urgence</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px">'
-    +field('Nom contact urgence','urgenceNom','text','')
-    +field('Tél. urgence','urgenceTel','tel','+33...')
-    +'</div>'
-    +field('Notes internes','notes','text','Informations complémentaires...');
+    // ── Identité ──────────────────────────────────────────────────────────
+    row2(field('Nom','nom','text','Nom de famille'),field('Prénom','prenom','text','Prénom'))
+    +row2(field('Date de naissance','dateNaissance','date',''),field('Lieu de naissance','lieuNaissance','text','Ex: Paris'))
+    +row2(field('Pays de naissance','paysNaissance','text','France'),field('Nationalité','nationalite','text','Française'))
+
+    // ── Adresse ───────────────────────────────────────────────────────────
+    +sec('&#127968; Adresse')
+    +field('Adresse','adresse','text','Numéro, rue...',true)
+    +field('Complément d&apos;adresse','adresse2','text','Bât, étage, lieu-dit...',true)
+    +row3(field('Code postal','cp','text','75000'),field('Ville','ville','text','Paris'),field('Email','email','email','contact@...'))
+    +row2(field('Téléphone fixe','telFixe','tel','+33...'),field('Mobile','mobile','tel','+33...'))
+
+    // ── Documents admin ───────────────────────────────────────────────────
+    +sec('&#128196; Informations administratives')
+    +row2(field('N° Sécurité sociale','numSS','text','1 85 12 34 567 890'),field('Date expiration SS','dateSSExp','date',''))
+    +row2(field('N° Carte vitale','numCV','text',''),field('Date expiration CV','dateCVExp','date',''))
+    +row2(field('N° Permis de conduire','numPermis','text',''),field('Catégorie permis','catPermis','text','C, CE...'))
+    +row3(field('Date délivrance permis','dateLivraisonPermis','date',''),field('Lieu de délivrance','lieuLivraisonPermis','text','Ex: Paris'),field('Date expiration permis','datePermis','date',''))
+
+    // ── Contrat ───────────────────────────────────────────────────────────
+    +sec('&#128196; Contrat de travail')
+    +row3(field('Statut','statut','text','CDI, CDD...'),field('Date début','dateContrat','date',''),field('Date fin (CDD)','dateContratFin','date',''))
+    +row3(field('Poste','poste','text','Chauffeur PL'),field('Temps de travail','tempsTravail','text','Temps plein'),field('Visite médicale','dateMedical','date',''))
+    +row2(field('N° Employé','numEmploye','text','EMP-001'),field('IBAN','iban','text','FR76...'))
+
+    // ── Urgence ───────────────────────────────────────────────────────────
+    +sec('&#128222; Contact d&apos;urgence')
+    +row2(field('Nom contact urgence','urgenceNom','text',''),field('Tél. urgence','urgenceTel','tel','+33...'))
+    +field('Notes internes','notes','text','Informations complémentaires...',true);
 
   showModal(
     '&#128203; Fiche signaletique',
@@ -2131,8 +2107,8 @@ function openFiche(id){
 function svFiche(id){
   const d=G.drivers.find(x=>x.id===id);if(!d)return;
   if(!d.fiche)d.fiche={};
-  const fields=['nom','prenom','dateNaissance','adresse','adresse2','cp','ville','email','telFixe','mobile',
-    'numSS','dateSSExp','numCV','dateCVExp','numPermis','catPermis','datePermis','nationalite',
+  const fields=['nom','prenom','dateNaissance','lieuNaissance','paysNaissance','adresse','adresse2','cp','ville','email','telFixe','mobile',
+    'numSS','dateSSExp','numCV','dateCVExp','numPermis','catPermis','datePermis','dateLivraisonPermis','lieuLivraisonPermis','nationalite',
     'statut','dateContrat','dateContratFin','dateMedical','poste','tempsTravail','numEmploye','iban',
     'urgenceNom','urgenceTel','notes'];
   fields.forEach(k=>{
