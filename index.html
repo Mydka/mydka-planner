@@ -236,7 +236,7 @@ button{cursor:pointer;font-family:inherit}
   <div onclick="goNav('tarifs');closeMobMenu()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;color:#fff;font-size:13px;cursor:pointer;border-radius:7px">💶 Tarifs</div>
   <div style="height:1px;background:rgba(255,255,255,.1);margin:4px 0"></div>
   <div onclick="exportDataJSON();closeMobMenu()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;color:#16A34A;font-size:13px;font-weight:700;cursor:pointer;border-radius:7px">📤 Exporter données</div>
-  <div onclick="exportMoisHTML();closeMobMenu()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;color:#9CA3AF;font-size:13px;cursor:pointer;border-radius:7px">💾 Sauvegarder</div>
+  <div onclick="manualSaveMois();closeMobMenu()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;color:#9CA3AF;font-size:13px;cursor:pointer;border-radius:7px">💾 Sauvegarder</div>
 </div>
   <div class="sb">
     <div class="sb-logo"><div class="sb-ic">&#128666;</div><div class="sb-tx">TourPlanner</div></div>
@@ -252,7 +252,7 @@ button{cursor:pointer;font-family:inherit}
       <div class="ni" id="ni-tarifs"             onclick="goNav('tarifs')">&#128181; Tarifs</div>
     </div>
     <div style="padding:8px;border-top:1px solid rgba(255,255,255,.08);margin-top:auto">
-      <button onclick="exportMoisHTML()" style="width:100%;padding:8px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:7px;color:#9CA3AF;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px">&#128190; Sauvegarder mois</button>
+      <button onclick="manualSaveMois()" style="width:100%;padding:8px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:7px;color:#9CA3AF;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px">&#128190; Sauvegarder mois</button>
         <button onclick="exportDataJSON()" style="width:100%;padding:8px 10px;margin-top:5px;background:rgba(22,163,74,.15);border:1px solid rgba(22,163,74,.4);border-radius:7px;color:#16A34A;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">&#128228; Exporter données</button>
         <label style="width:100%;padding:8px 10px;margin-top:5px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:7px;color:#16A34A;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">&#128229; Importer données<input type="file" accept=".json" style="display:none" onchange="importDataJSON(this)"></label>
         <div id="sb-status" style="margin-top:6px;text-align:center;font-size:9px;color:#4B5563">&#9679; Connexion Supabase...</div>
@@ -1168,6 +1168,22 @@ function buildStaticSnapshotHtml(){
   html=html.replace(/<title>[^<]*<\/title>/,'<title>TourPlanner — Archive du '+dateStr+'</title>');
   return html;
 }
+// Bouton manuel "Sauvegarder mois" : TOUJOURS un téléchargement classique, jamais dans le dossier auto
+async function manualSaveMois(){
+  const html=buildStaticSnapshotHtml();
+  const moisNom=MFR[G.m]||'Mois';
+  const annee=G.y;
+  const nomTelechargement='TourPlanner_'+moisNom+'_'+annee+'.html';
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=nomTelechargement;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('&#128190; '+nomTelechargement+' téléchargé — déposez-le dans OneDrive ✓');
+}
+// Sauvegarde automatique du soir (filet de sécurité) : écrit dans le dossier choisi si configuré, sinon télécharge
 async function exportMoisHTML(gesture){
   if(gesture===undefined)gesture=true; // clic manuel par défaut = a le droit de redemander la permission
   // Instantané figé (données intégrées) plutôt qu'une copie qui se resynchroniserait avec Supabase
@@ -1404,7 +1420,7 @@ function rPlanning(c){
     cells+=`<div class="cc" onclick="openDayMo('${ds}')">${alert?'<div class="cc-alert-dot"></div>':''}${nbHS>0&&!alert?'<div style="width:6px;height:6px;border-radius:50%;background:#F97316;position:absolute;top:3px;right:3px"></div>':''}${isManual?'<div style="position:absolute;top:2px;left:3px;font-size:7px;font-weight:700;color:#16A34A;background:#F0FDF4;padding:0 3px;border-radius:3px">M</div>':''}<div class="cc-top"><div class="cc-dn${isT(d)?' today':''}">${d}</div><span style="font-size:10px;font-weight:700;color:${chColor}">${nbPres}/${nbTot}</span></div><div class="cc-tours">&#128667; ${totalT} dem. · ${nbAssignes} aff.${sansVehJ>0?` <span style="color:#F97316;font-weight:700">⚠${sansVehJ}🚫</span>`:''}${vehHorsServiceJ>0?` <span style="color:#EF4444;font-weight:700">🔧${vehHorsServiceJ}</span>`:''}</div>${pills?`<div class="cc-pills">${pills}</div>`:''}${alert?`<div style="font-size:8px;color:#EF4444;font-weight:700">&#9888; -${alert.manque}</div>`:''}</div>`;
   }
   const rem=(fd+dim)%7;if(rem>0)for(let i=0;i<7-rem;i++)cells+=`<div class="cc empty"></div>`;
-  c.innerHTML=`<div class="ptitle">Planning des Tournees</div><div class="psub">${MFR[m]} ${y} · ${allPlan.length} chauffeurs planifiables</div>${alertsHtml}<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-or" onclick="dispatchMois()">&#9889; Re-dispatcher (demain+)</button><button class="btn btn-out" onclick="openDayMo('${y}-${pd(m+1)}-${pd(new Date().getDate())}')">&#128197; Aujourd&apos;hui</button><button class="btn btn-out" onclick="exportMoisHTML()" title="Sauvegarder ce mois sur OneDrive" style="margin-left:auto">&#128190; Sauvegarder ${MFR[m]} ${y}</button></div><div class="cal-nav"><button class="cnb" onclick="calM(-1)">&#8249;</button><div class="cmt">${MFR[m]} ${y}</div><button class="cnb" onclick="calM(1)">&#8250;</button></div><div class="cal-grid">${DFR.map(d=>`<div class="cdow">${d}</div>`).join('')}${cells}</div>`;
+  c.innerHTML=`<div class="ptitle">Planning des Tournees</div><div class="psub">${MFR[m]} ${y} · ${allPlan.length} chauffeurs planifiables</div>${alertsHtml}<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-or" onclick="dispatchMois()">&#9889; Re-dispatcher (demain+)</button><button class="btn btn-out" onclick="openDayMo('${y}-${pd(m+1)}-${pd(new Date().getDate())}')">&#128197; Aujourd&apos;hui</button><button class="btn btn-out" onclick="manualSaveMois()" title="Télécharger une sauvegarde de ce mois" style="margin-left:auto">&#128190; Sauvegarder ${MFR[m]} ${y}</button></div><div class="cal-nav"><button class="cnb" onclick="calM(-1)">&#8249;</button><div class="cmt">${MFR[m]} ${y}</div><button class="cnb" onclick="calM(1)">&#8250;</button></div><div class="cal-grid">${DFR.map(d=>`<div class="cdow">${d}</div>`).join('')}${cells}</div>`;
 }
 function calM(d){if(d<0){if(G.m===0){G.m=11;G.y--;}else G.m--;}else{if(G.m===11){G.m=0;G.y++;}else G.m++;}rPlanning(document.getElementById('content'));}
 
