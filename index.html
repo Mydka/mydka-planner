@@ -334,6 +334,7 @@ const DEF={
 const _now=new Date();let G={drivers:[],veh:[],clients:[],regles:[],reglesBloc:[],reglesOrdre:[],conges:[],entretiens:[],statuts:{},tours_prov:{},aff:{},affExtra:{},affPrix:{},ac:[],vehSwaps:[],vehPeriod:[],hiddenDrivers:[],tarifs:{},y:_now.getFullYear(),m:_now.getMonth(),nid:15,semTbl:0,nbSemTbl:99};
 
 async function dbSave(){
+  if(window.__SNAPSHOT_DATA__){console.warn('Sauvegarde archivée en lecture seule — modification non enregistrée');return;}
   const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-6);
   const cutStr=cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0');
   const aff={};Object.keys(G.aff).forEach(k=>{if(k.slice(0,7)>=cutStr)aff[k]=G.aff[k];});
@@ -371,6 +372,13 @@ function syncBackupFolderDebounced(){
   },2000);
 }
 async function dbLoad(){
+  if(window.__SNAPSHOT_DATA__){
+    // Mode sauvegarde archivée : les données viennent du fichier lui-même, pas de Supabase
+    const s=window.__SNAPSHOT_DATA__;
+    Object.keys(s).forEach(k=>{G[k]=s[k];});
+    console.log('Sauvegarde archivée chargée depuis le fichier (mode hors-ligne, lecture seule)');
+    return;
+  }
   try{
     // Charger depuis Supabase en priorité, fallback local
     const rmSb=await sbGet(SK+'_m');
@@ -1133,10 +1141,37 @@ async function doMigrate(){
   closeMo();
   toast('&#10003; Migration terminée ! Données synchronisées sur Supabase.');
 }
+function buildSnapshotDataObject(){
+  // Mêmes champs que la sauvegarde complète, mais figés au moment présent
+  return {
+    drivers:G.drivers, veh:G.veh, clients:G.clients,
+    regles:G.regles, reglesBloc:G.reglesBloc||[], reglesOrdre:G.reglesOrdre||[],
+    conges:G.conges||[], vehSwaps:G.vehSwaps||[],
+    vehHistory:G.vehHistory||[], vehPeriod:G.vehPeriod||[], entretiens:G.entretiens||[],
+    tarifs:G.tarifs||{}, tarifsSalarie:G.tarifsSalarie||{}, nid:G.nid,
+    hiddenDrivers:G.hiddenDrivers||[],
+    statuts:G.statuts, tours_prov:G.tours_prov, manualDays:G.manualDays||{},
+    ajustSalaire:G.ajustSalaire||{}, acomptes:G.acomptes||[], retenues:G.retenues||[],
+    aff:G.aff, affExtra:G.affExtra||{}, affPrix:G.affPrix||{}, affHeure:G.affHeure||{},
+    ac:G.ac||[]
+  };
+}
+function buildStaticSnapshotHtml(){
+  // Instantané figé : les données sont intégrées dans le fichier, pas rechargées depuis Supabase.
+  // Ouvrir ce fichier plus tard montre TOUJOURS l'état d'aujourd'hui, même hors-ligne, même après
+  // que les vraies données en ligne aient changé.
+  let html=document.documentElement.outerHTML;
+  const dateStr=fmtDate(new Date().toISOString().slice(0,10))+' '+new Date().toTimeString().slice(0,5);
+  const dataJson=JSON.stringify(buildSnapshotDataObject()).replace(/</g,'\\u003c'); // évite de casser le HTML sur la balise de script
+  const injection='<script>window.__SNAPSHOT_DATA__='+dataJson+';window.__SNAPSHOT_DATE__='+JSON.stringify(dateStr)+';<'+'/script>';
+  html=html.replace('<head>','<head>'+injection);
+  html=html.replace(/<title>[^<]*<\/title>/,'<title>TourPlanner — Archive du '+dateStr+'</title>');
+  return html;
+}
 async function exportMoisHTML(gesture){
   if(gesture===undefined)gesture=true; // clic manuel par défaut = a le droit de redemander la permission
-  // Récupérer le HTML complet de la page
-  const html=document.documentElement.outerHTML;
+  // Instantané figé (données intégrées) plutôt qu'une copie qui se resynchroniserait avec Supabase
+  const html=buildStaticSnapshotHtml();
   const moisNom=MFR[G.m]||'Mois';
   const annee=G.y;
   const nomTelechargement='TourPlanner_'+moisNom+'_'+annee+'.html';
@@ -5447,6 +5482,20 @@ window.addEventListener('resize',()=>{
   if(vscroll){const top=vscroll.getBoundingClientRect().top;vscroll.style.maxHeight=Math.max(240,window.innerHeight-top-16)+'px';}
 });
 dbLoad().then(async ()=>{
+  if(window.__SNAPSHOT_DATA__){
+    // Mode sauvegarde archivée : démarrage simplifié, aucune écriture réseau
+    document.getElementById('loading').style.display='none';
+    document.getElementById('app').style.display='flex';
+    rPlanning(document.getElementById('content'));
+    const el=document.getElementById('sb-status');
+    if(el){el.innerHTML='&#128193; Sauvegarde archivée (lecture seule)';el.style.color='#D97706';}
+    const banner=document.createElement('div');
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#D97706;color:#fff;text-align:center;padding:6px;font-size:12px;font-weight:700';
+    banner.innerHTML='&#128193; Ceci est une sauvegarde archivée du '+(window.__SNAPSHOT_DATE__||'')+' — lecture seule, aucune modification ne sera enregistrée';
+    document.body.prepend(banner);
+    document.body.style.paddingTop='32px';
+    return;
+  }
   // Bootstrap seulement si Supabase vide
   if(!G.aff||Object.keys(G.aff).length===0){
     console.log('Supabase vide — chargement bootstrap...');
