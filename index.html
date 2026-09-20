@@ -1696,7 +1696,6 @@ function buildDayWaMessage(ds){
   };
 
   const groups={};   // clientId -> {nom, AM:[{nom,veh,heure}], PM:[...]}
-  const absences=[];
   const addToGroup=(cl,period,nom,veh,heure)=>{
     if(!groups[cl.id])groups[cl.id]={nom:cl.nom,AM:[],PM:[]};
     groups[cl.id][period].push({nom,veh,heure});
@@ -1705,11 +1704,7 @@ function buildDayWaMessage(ds){
   planDrvs.forEach(dr=>{
     if(dr.statut==='inactif')return;
     const stat=gStat(ds,dr.id);
-    if(stat!=='present'){
-      const lbl=stat==='absent'?'Absent':stat==='conge'?'Congé':'Maladie';
-      absences.push(shortNom(dr.nom)+' — '+lbl);
-      return;
-    }
+    if(stat!=='present')return; // absent/congé/maladie : pas dans le message de planning
     const cidAM=getAff(ds,dr.id,'AM');
     const cidPM=getAff(ds,dr.id,'PM');
     const clAM=cidAM?G.clients.find(x=>x.id===cidAM):null;
@@ -1719,6 +1714,12 @@ function buildDayWaMessage(ds){
     const heurePM=getAffHeure(ds,dr.id,'PM')||(clPM&&clPM.heure)||null;
     if(clAM)addToGroup(clAM,'AM',shortNom(dr.nom),veh,heureAM);
     if(clPM)addToGroup(clPM,'PM',shortNom(dr.nom),veh,heurePM);
+    // Tournées supplémentaires : affichées normalement dans Matin ou Après-midi selon leur période
+    getAffExtra(ds,dr.id).forEach(ex=>{
+      if(ex.clientId==='CUSTOM')return;
+      const clEx=G.clients.find(x=>x.id===ex.clientId);
+      if(clEx)addToGroup(clEx,ex.period==='PM'?'PM':'AM',shortNom(dr.nom),veh,ex.heure||null);
+    });
   });
 
   let lines=[];
@@ -1747,11 +1748,6 @@ function buildDayWaMessage(ds){
       });
     }
   });
-  if(absences.length){
-    lines.push('');
-    lines.push('🚫 *Absences*');
-    absences.forEach(n=>lines.push('• '+n));
-  }
   lines.push('');
   lines.push('_Mydka Planning_');
   return lines.join('\n');
@@ -1875,11 +1871,31 @@ function openExtraDD(ds,driverId,idx,tdEl){
     dd.appendChild(op);
   });
   const sep=document.createElement('div');sep.className='cl-dd-sep';dd.appendChild(sep);
+  const heureOpt=document.createElement('div');heureOpt.className='cl-dd-opt';
+  heureOpt.style.cssText='color:#2563EB;font-weight:700';
+  heureOpt.innerHTML='&#9200; Heure de chargement'+(e.heure?' <span style="margin-left:auto;font-weight:700">'+e.heure+'</span>':'');
+  heureOpt.onclick=ev=>{ev.stopPropagation();closeDD();
+    const dr=G.drivers.find(x=>x.id===driverId);
+    showModal('&#9200; Heure de chargement',(dr?dr.nom:'')+' — Tournée extra',
+      '<div class="fg"><label class="fl">Heure</label><input class="fi" type="time" id="th-heure" value="'+(e.heure||'')+'"></div>',
+      '<button class="btn btn-out btn-sm" onclick="closeMo()">Annuler</button>'
+      +(e.heure?'<button class="btn btn-sm" style="background:#DC2626;color:#fff" onclick="setExtraHeure(\''+ds+'\','+driverId+','+idx+',null);closeMo();dbSave();rTableau(document.getElementById(\'content\'))">Effacer</button>':'')
+      +'<button class="btn btn-or btn-sm" onclick="setExtraHeure(\''+ds+'\','+driverId+','+idx+',document.getElementById(\'th-heure\').value);closeMo();dbSave();rTableau(document.getElementById(\'content\'))">Enregistrer</button>');
+  };
+  dd.appendChild(heureOpt);
+  const sep2=document.createElement('div');sep2.className='cl-dd-sep';dd.appendChild(sep2);
   const dl=document.createElement('div');dl.className='cl-dd-del';
   dl.innerHTML='&#10005; Supprimer cette tournée';
   dl.onclick=ev=>{ev.stopPropagation();delAffExtra(ds,driverId,idx);closeDD();dbSave();rTableau(document.getElementById('content'));};
   dd.appendChild(dl);
   tdEl.style.position='relative';tdEl.appendChild(dd);regDD(dd);
+}
+function setExtraHeure(ds,driverId,idx,val){
+  const extras=getAffExtra(ds,driverId);
+  if(!extras[idx])return;
+  if(val)extras[idx].heure=val;else delete extras[idx].heure;
+  if(!G.affExtra)G.affExtra={};
+  G.affExtra[ds+'_'+driverId]=extras;
 }
 
 function openAssignDD(ds,did,tdEl,period){
@@ -1956,7 +1972,7 @@ addEx.onclick=e=>{e.stopPropagation();closeDD();
     +'<div class="fg"><label class="fl">Prix (optionnel)</label><input class="fi" type="number" id="ex-prix" placeholder="Ex: 54"></div>',
     '<button class="btn btn-out btn-sm" onclick="closeMo()">Annuler</button>'
     +'<button class="btn btn-or btn-sm" onclick="confAddExtra()">&#43; Ajouter</button>');
-  window._extraDs=ds;window._extraDid=did;};
+  window._extraDs=ds;window._extraDid=did;window._extraPeriod=period;};
 dd.appendChild(addEx);
 const sp3=document.createElement('div');sp3.className='cl-dd-sep';dd.appendChild(sp3);
 const curHeure=getAffHeure(ds,did,period);
@@ -1977,12 +1993,13 @@ const dl=document.createElement('div');dl.className='cl-dd-del';dl.innerHTML='&#
 
 function confAddExtra(){
   const ds=window._extraDs;const did=window._extraDid;if(!ds||!did)return;
+  const period=window._extraPeriod||'AM';
   const clId=document.getElementById('ex-cl').value;
   const prix=parseFloat(document.getElementById('ex-prix').value)||null;
   const cl=G.clients.find(x=>x.id===clId);
   if(!G.affExtra)G.affExtra={};
   const key=ds+'_'+did;if(!G.affExtra[key])G.affExtra[key]=[];
-  G.affExtra[key].push({clientId:clId,label:cl?cl.nom:clId,prix,note:'',ts:nowTs()});
+  G.affExtra[key].push({clientId:clId,label:cl?cl.nom:clId,prix,note:'',ts:nowTs(),period});
   closeMo();dbSave();rTableau(document.getElementById('content'));
   toast('Course supplémentaire ajoutée ✓');
 }
@@ -2230,6 +2247,11 @@ function buildTableauRows(y,m,allPlan,semaines,semStart,nbSem){
 }
 
 function rTableau(c){
+  // Conserver la position de défilement actuelle pour ne pas "sauter" en haut à chaque re-rendu (après assignation, etc.)
+  const prevVscroll=c.querySelector('.tbl-vscroll');
+  const prevScrollTop=prevVscroll?prevVscroll.scrollTop:0;
+  const prevOuter=c.querySelector('.tbl-outer');
+  const prevScrollLeft=prevOuter?prevOuter.scrollLeft:0;
   const y=G.y,m=G.m,dim=new Date(y,m+1,0).getDate();
   const allPlanFull=planDrivers();        // tous les chauffeurs planifiables
   const allPlan=planDriversVisible();     // visibles dans le tableau
@@ -2319,7 +2341,10 @@ function rTableau(c){
       const top=vscroll.getBoundingClientRect().top;
       const avail=Math.max(240,window.innerHeight-top-16);
       vscroll.style.maxHeight=avail+'px';
+      vscroll.scrollTop=prevScrollTop;
     }
+    const outer=c.querySelector('.tbl-outer');
+    if(outer)outer.scrollLeft=prevScrollLeft;
     if(theadRows.length===2){
       const row1H=theadRows[0].getBoundingClientRect().height;
       [...theadRows[0].children].forEach(th=>{th.style.position='sticky';th.style.top='0px';th.style.zIndex='15';});
