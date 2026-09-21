@@ -257,6 +257,7 @@ button{cursor:pointer;font-family:inherit}
         <label style="width:100%;padding:8px 10px;margin-top:5px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:7px;color:#16A34A;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">&#128229; Importer données<input type="file" accept=".json" style="display:none" onchange="importDataJSON(this)"></label>
         <div id="sb-status" style="margin-top:6px;text-align:center;font-size:9px;color:#4B5563">&#9679; Connexion Supabase...</div>
         <div onclick="openAutoBackupSettings()" style="margin-top:6px;text-align:center;font-size:9px;color:#6B7280;cursor:pointer;text-decoration:underline">&#9881; Sauvegarde auto du soir</div>
+        <div style="margin-top:4px;text-align:center;font-size:8px;color:#374151">Version 2026-09-21-b</div>
     </div>
   </div>
   <div class="content" id="content"></div>
@@ -2426,12 +2427,13 @@ function attribuerCamionPeriode(driverId){
   };
   const vehOpts=(vehActifs.length?'<optgroup label="Actifs">'+vehActifs.map(makeOpt).join('')+'</optgroup>':'')
     +(vehHors.length?'<optgroup label="Hors service">'+vehHors.map(makeOpt).join('')+'</optgroup>':'');
-  showModal('&#128667; Attribuer camion — '+dr.nom,'',
+  const drvOpts=G.drivers.filter(d=>d.plan).map(function(d){
+    return '<option value="'+d.id+'"'+(d.id===driverId?' selected':'')+'>'+d.nom+(d.veh?' ('+d.veh+')':' — sans camion')+'</option>';
+  }).join('');
+  showModal('&#128667; Attribuer camion','',
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
       +'<div class="fg"><label class="fl">Camion</label><select class="fs" id="ap-veh" onchange="checkAttrPeriode()">'+vehOpts+'</select></div>'
-      +'<div class="fg" style="display:flex;flex-direction:column;justify-content:flex-end"><label style="font-size:11px;color:#6B7280;font-weight:600;margin-bottom:4px">Statut actuel</label>'
-        +'<div style="font-size:12px;font-weight:700;color:'+(dr.veh?'#16A34A':'#EF4444')+'">&#128667; '+(dr.veh||'Aucun camion')+'</div>'
-      +'</div>'
+      +'<div class="fg"><label class="fl">Chauffeur</label><select class="fs" id="ap-drv" onchange="checkAttrPeriode()">'+drvOpts+'</select></div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">'
       +'<div class="fg"><label class="fl">Date début</label><input class="fi" type="date" id="ap-d1" value="'+today+'" onchange="checkAttrPeriode()"></div>'
@@ -2440,11 +2442,12 @@ function attribuerCamionPeriode(driverId){
     +'<div class="fg"><label class="fl">Note (optionnel)</label><input class="fi" id="ap-note" placeholder="Remplacement, mission..."></div>'
     +'<div id="ap-check"></div>',
     '<button class="btn btn-out btn-sm" onclick="closeMo()">Annuler</button>'
-    +'<button class="btn btn-or btn-sm" id="ap-btn" onclick="svAttrPeriode('+driverId+')">Attribuer</button>');
-  setTimeout(checkAttrPeriode,50);
+    +'<button class="btn btn-or btn-sm" id="ap-btn" onclick="svAttrPeriode()">Attribuer</button>');
+  setTimeout(function(){checkAttrPeriode();},50);
 }
 
 function checkAttrPeriode(){
+  var driverId=parseInt(document.getElementById('ap-drv').value);
   var vehId=document.getElementById('ap-veh').value;
   var d1=document.getElementById('ap-d1').value;
   var d2=document.getElementById('ap-d2').value;
@@ -2458,30 +2461,35 @@ function checkAttrPeriode(){
   if(vehObj&&!vehObj.actif){
     warns.push('<div class="attr-warn">&#128295; Ce véhicule est <strong>hors service</strong> — attribution possible pour la période de réparation. Il repassera actif lors de la réattribution.</div>');
   }
-  // Vérif 2 : déjà attribué à un autre chauffeur
-  var autreChauf=G.drivers.find(function(d){return d.veh===vehId&&d.id!==parseInt(document.getElementById('ap-veh').closest('.modal').getAttribute('data-did')||0);});
-  // Chercher via vehPeriod si attribué sur cette période
+  // Vérif 2 : ce camion est-il déjà attribué à un AUTRE chauffeur sur cette période ?
   var conflict=(G.vehPeriod||[]).filter(function(p){
-    return p.vehId===vehId&&p.debut<=d2&&p.fin>=d1;
+    return p.vehId===vehId&&p.driverId!==driverId&&p.debut<=d2&&p.fin>=d1;
   });
   conflict.forEach(function(p){
     var dr=G.drivers.find(function(d){return d.id===p.driverId;});
-    warns.push('<div class="attr-warn">&#9888; <strong>'+(dr?dr.nom:'Chauffeur')+
-      '</strong> a ce camion du '+fmtDate(p.debut)+' au '+fmtDate(p.fin)+'</div>');
+    var idx=G.vehPeriod.indexOf(p);
+    warns.push('<div class="attr-warn" style="display:flex;align-items:center;gap:8px">'
+      +'<span style="flex:1">&#9888; <strong>'+(dr?dr.nom:'Chauffeur')+'</strong> a déjà ce camion du '+fmtDate(p.debut)+' au '+fmtDate(p.fin)+'</span>'
+      +'<button type="button" onclick="delVehPeriod('+idx+');checkAttrPeriode('+driverId+')" style="border:1px solid #DC2626;background:#fff;color:#DC2626;border-radius:5px;font-size:10px;font-weight:700;padding:2px 8px;cursor:pointer;white-space:nowrap">&#128465; Supprimer</button>'
+    +'</div>');
   });
-  // Vérif 3 : chauffeur absent/congé sur la période
-  var drId=parseInt(document.getElementById('ap-veh').closest('form')||0);
-  // On va chercher depuis l'id stocké dans la modale
-  var da=new Date(d1+'T00:00:00'),db=new Date(d2+'T00:00:00');
-  var absJours=[];
-  for(var dt=new Date(da);dt<=db;dt.setDate(dt.getDate()+1)){
-    var ds=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
-    // On ne peut pas facilement récupérer driverId ici — on le fait à la validation
-  }
+  // Vérif 3 : CE chauffeur a-t-il déjà un AUTRE camion attribué qui chevauche ces dates ?
+  var selfConflict=(G.vehPeriod||[]).filter(function(p){
+    return p.driverId===driverId&&p.vehId!==vehId&&p.debut<=d2&&p.fin>=d1;
+  });
+  var drSelf=G.drivers.find(function(d){return d.id===driverId;});
+  selfConflict.forEach(function(p){
+    var idx=G.vehPeriod.indexOf(p);
+    warns.push('<div class="attr-warn" style="display:flex;align-items:center;gap:8px">'
+      +'<span style="flex:1">&#9888; <strong>'+(drSelf?drSelf.nom:'Ce chauffeur')+'</strong> a déjà <strong>'+p.vehId+'</strong> du '+fmtDate(p.debut)+' au '+fmtDate(p.fin)+' — cette nouvelle attribution le remplacera sur les dates communes</span>'
+      +'<button type="button" onclick="delVehPeriod('+idx+');checkAttrPeriode('+driverId+')" style="border:1px solid #DC2626;background:#fff;color:#DC2626;border-radius:5px;font-size:10px;font-weight:700;padding:2px 8px;cursor:pointer;white-space:nowrap">&#128465; Supprimer</button>'
+    +'</div>');
+  });
   box.innerHTML=warns.join('')+(warns.length===0?'<div class="attr-ok">&#10003; Aucun conflit détecté</div>':'');
 }
 
-function svAttrPeriode(driverId){
+function svAttrPeriode(){
+  var driverId=parseInt(document.getElementById('ap-drv').value);
   var vehId=document.getElementById('ap-veh').value;
   var d1=document.getElementById('ap-d1').value;
   var d2=document.getElementById('ap-d2').value;
@@ -2500,21 +2508,25 @@ function svAttrPeriode(driverId){
   if(joursAbs.length>0){
     if(!confirm('Attention : '+dr.nom+' absent sur '+joursAbs.length+' jours. Continuer ?'))return;
   }
-  // Enregistrer l'attribution de période
+  // Retirer les anciennes périodes de ce chauffeur qui chevauchent la nouvelle (évite doublons + conflits de dates)
   if(!G.vehPeriod)G.vehPeriod=[];
+  const before=G.vehPeriod.length;
+  G.vehPeriod=G.vehPeriod.filter(function(p){
+    return !(p.driverId===driverId&&p.debut<=d2&&p.fin>=d1);
+  });
+  if(G.vehPeriod.length<before)console.log((before-G.vehPeriod.length)+' ancienne(s) période(s) chevauchante(s) remplacée(s)');
+  // Enregistrer l'attribution de période
   G.vehPeriod.push({driverId:driverId,vehId:vehId,debut:d1,fin:d2,note:note,ts:ts});
-  // Mettre à jour le camion actuel si la période inclut aujourd'hui
   var today=new Date().toISOString().slice(0,10);
-  if(d1<=today&&today<=d2){
-    dr.veh=vehId;
-    logVehAssign(driverId,vehId);
-  }
+  // NB : on ne touche pas au camion principal (dr.veh) — c'est une attribution TEMPORAIRE.
+  // Le chauffeur reprendra automatiquement son camion principal une fois la période terminée
+  // (la case "Camion" du tableau va lire vehPeriod en priorité pour ces dates précises).
   // Enregistrer dans l'historique
   if(!G.vehHistory)G.vehHistory=[];
   G.vehHistory.push({
     type:'assign',ts:ts,veh:vehId,driverId:driverId,
     desc:(dr?dr.nom:'?')+' ← '+vehId+' du '+fmtDate(d1)+' au '+fmtDate(d2)+(note?' — '+note:''),
-    entretienType:null
+    entretienType:null,periodOnly:true
   });
   // Si le véhicule était hors service et que la période commence aujourd'hui ou avant → le remettre actif
   const vehObj2=G.veh.find(function(v){return v.id===vehId;});
@@ -3766,18 +3778,66 @@ function attribuerVehAChauf(vehId){
   var drvOpts=G.drivers.filter(function(d){return d.plan;}).map(function(d){
     return '<option value="'+d.id+'">'+(d.veh?'':'★ ')+d.nom+(d.veh?' ('+d.veh+')':' — sans camion')+'</option>';
   }).join('');
-  var warn=(!vehObj||!vehObj.actif)?'<div class="attr-warn">&#128295; Vehicule hors service — sera remis en service automatiquement.</div>':'';
   var today=new Date().toISOString().slice(0,10);
+  // Historique des chauffeurs ayant eu ce camion (assignations passées, plus récentes en premier)
+  var principal=G.drivers.find(function(d){return d.veh===vehId;});
+  var histAssigns=(G.vehHistory||[]).filter(function(h){return h.type==='assign'&&h.veh===vehId;})
+    .sort(function(a,b){return (b.ts||'').localeCompare(a.ts||'');});
+  var seen={};var histRows='';
+  histAssigns.forEach(function(h){
+    if(seen[h.driverId])return;seen[h.driverId]=true;
+    var dr2=G.drivers.find(function(d){return d.id===h.driverId;});
+    var isPrincipalNow=principal&&principal.id===h.driverId;
+    histRows+='<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid #F3F4F6">'
+      +'<span>'+(dr2?dr2.nom:'Chauffeur #'+h.driverId)+(isPrincipalNow?' <span style="color:#16A34A;font-weight:700">(actuel)</span>':'')+'</span>'
+      +'<span style="color:#9CA3AF">'+fmtDate((h.ts||'').slice(0,10))+'</span>'
+    +'</div>';
+  });
+  var histSection=histRows
+    ?'<div style="margin-top:10px;padding:8px 10px;background:#F9FAFB;border-radius:7px"><div style="font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;margin-bottom:4px">&#128337; Chauffeurs ayant eu ce camion</div>'+histRows+'</div>'
+    :'';
   showModal('Attribuer '+vehId,'',
-    warn
-    +'<div class="fg" style="margin-top:8px"><label class="fl">Chauffeur</label><select class="fs" id="avc-drv">'+drvOpts+'</select></div>'
+    (principal?'<div style="font-size:11px;color:#16A34A;font-weight:700;margin-bottom:8px">&#128667; Camion principal actuel : '+principal.nom+'</div>':'')
+    +'<div class="fg" style="margin-top:8px"><label class="fl">Chauffeur</label><select class="fs" id="avc-drv" onchange="checkAttrVehSide(&quot;'+vehId+'&quot;)">'+drvOpts+'</select></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">'
-      +'<div class="fg" style="margin:0"><label class="fl">Debut</label><input class="fi" type="date" id="avc-d1" value="'+today+'"></div>'
-      +'<div class="fg" style="margin:0"><label class="fl">Fin (optionnel)</label><input class="fi" type="date" id="avc-d2" value=""></div>'
+      +'<div class="fg" style="margin:0"><label class="fl">Debut</label><input class="fi" type="date" id="avc-d1" value="'+today+'" onchange="checkAttrVehSide(&quot;'+vehId+'&quot;)"></div>'
+      +'<div class="fg" style="margin:0"><label class="fl">Fin (optionnel — laisser vide pour une attribution permanente)</label><input class="fi" type="date" id="avc-d2" value="" onchange="checkAttrVehSide(&quot;'+vehId+'&quot;)"></div>'
     +'</div>'
-    +'<div class="fg"><label class="fl">Note</label><input class="fi" id="avc-note" placeholder="Retour reparation, remplacement..."></div>',
+    +'<div class="fg"><label class="fl">Note</label><input class="fi" id="avc-note" placeholder="Retour reparation, remplacement..."></div>'
+    +'<div id="avc-check"></div>'
+    +histSection,
     '<button class="btn btn-out btn-sm" onclick="closeMo()">Annuler</button>'
     +'<button class="btn btn-or btn-sm" onclick="confAttribuerVehAChauf(\''+vehId+'\')" >Attribuer</button>');
+  setTimeout(function(){checkAttrVehSide(vehId);},50);
+}
+function checkAttrVehSide(vehId){
+  var box=document.getElementById('avc-check');if(!box)return;
+  var vehObj=G.veh.find(function(v){return v.id===vehId;});
+  var driverId=parseInt(document.getElementById('avc-drv').value);
+  var d1=document.getElementById('avc-d1').value;
+  var d2=document.getElementById('avc-d2').value||d1;
+  var warns=[];
+  if(!vehObj||!vehObj.actif){
+    warns.push('<div class="attr-warn">&#128295; Ce véhicule est <strong>hors service</strong> — il sera remis en service automatiquement.</div>');
+  }
+  // Le chauffeur a-t-il déjà un AUTRE camion attribué qui chevauche ces dates ?
+  var conflicts=(G.vehPeriod||[]).filter(function(p){
+    return p.driverId===driverId&&p.vehId!==vehId&&p.debut<=d2&&p.fin>=d1;
+  });
+  conflicts.forEach(function(p){
+    var idx=G.vehPeriod.indexOf(p);
+    var dr=G.drivers.find(function(d){return d.id===driverId;});
+    warns.push('<div class="attr-warn" style="display:flex;align-items:center;gap:8px">'
+      +'<span style="flex:1">&#9888; <strong>'+(dr?dr.nom:'Ce chauffeur')+'</strong> a déjà <strong>'+p.vehId+'</strong> du '+fmtDate(p.debut)+' au '+fmtDate(p.fin)+' — cette nouvelle attribution le remplacera sur les dates communes</span>'
+      +'<button type="button" onclick="delVehPeriod('+idx+');checkAttrVehSide(&quot;'+vehId+'&quot;)" style="border:1px solid #DC2626;background:#fff;color:#DC2626;border-radius:5px;font-size:10px;font-weight:700;padding:2px 8px;cursor:pointer;white-space:nowrap">&#128465; Supprimer</button>'
+    +'</div>');
+  });
+  // Si le camion actuel (hors période) est déjà attribué à un autre chauffeur
+  var autreChauf=G.drivers.find(function(d){return d.veh===vehId&&d.id!==driverId;});
+  if(autreChauf&&d1<=new Date().toISOString().slice(0,10)){
+    warns.push('<div class="attr-warn">&#9888; Ce camion est actuellement conduit par <strong>'+autreChauf.nom+'</strong> — il sera détaché automatiquement.</div>');
+  }
+  box.innerHTML=warns.join('')+(warns.length===0?'<div class="attr-ok">&#10003; Aucun conflit détecté</div>':'');
 }
 
 function confAttribuerVehAChauf(vehId){
@@ -3793,24 +3853,28 @@ function confAttribuerVehAChauf(vehId){
   if(vehObj&&!vehObj.actif){vehObj.actif=true;}
   var ts=nowTs();
   if(!G.vehHistory)G.vehHistory=[];
-  // Détacher l'ancien chauffeur de ce camion s'il y en a un (évite qu'il reste "avec camion" par erreur)
+  var isTemporaire=!!(d2&&d2>=d1);
+  // Détacher l'ancien chauffeur de ce camion s'il y en a un — uniquement pour une attribution PERMANENTE
   var ancienDr=G.drivers.find(function(d){return d.veh===vehId&&d.id!==driverId;});
-  if(ancienDr&&d1<=today){
+  if(ancienDr&&d1<=today&&!isTemporaire){
     ancienDr.veh=null;
     G.vehHistory.push({type:'release',ts:ts,veh:vehId,driverId:ancienDr.id,
       desc:ancienDr.nom+' détaché de '+vehId+' (réattribué à '+dr.nom+')',entretienType:null,note:''});
   }
-  // Attribution immédiate si début <= aujourd'hui
-  if(d1<=today){dr.veh=vehId;}
-  // Enregistrer dans vehPeriod si une fin est spécifiée
-  if(d2&&d2>=d1){
+  // Attribution PERMANENTE (pas de date de fin) → devient le camion principal. Sinon, prêt temporaire : le camion principal n'est pas modifié.
+  if(d1<=today&&!isTemporaire){dr.veh=vehId;}
+  // Enregistrer dans vehPeriod si une fin est spécifiée (attribution temporaire)
+  if(isTemporaire){
     if(!G.vehPeriod)G.vehPeriod=[];
+    G.vehPeriod=G.vehPeriod.filter(function(p){
+      return !(p.driverId===driverId&&p.debut<=d2&&p.fin>=d1);
+    });
     G.vehPeriod.push({driverId:driverId,vehId:vehId,debut:d1,fin:d2,note:note,ts:ts});
   }
   // Historique
   G.vehHistory.push({type:'assign',ts:ts,veh:vehId,driverId:driverId,
     desc:dr.nom+' ← '+vehId+(d2?' du '+fmtDate(d1)+' au '+fmtDate(d2):'')+(note?' — '+note:''),
-    entretienType:null});
+    entretienType:null,periodOnly:isTemporaire});
   closeMo();dbSave();rVehicules(document.getElementById('content'));
   toast(vehId+' attribue a '+dr.nom+' ✓');
 }
@@ -4907,9 +4971,21 @@ function getVehForDay(driverId, ds){
   const dr=G.drivers.find(d=>d.id===driverId);
   if(!dr)return'—';
 
+  // Dimanche : le chauffeur repart chez lui avec le camion qu'il avait le samedi — on reprend
+  // simplement le résultat calculé pour la veille (samedi), sans marquer un "début de période"
+  const isSundayDs=new Date(ds+'T00:00:00').getDay()===0;
+  if(isSundayDs){
+    const satDate=new Date(ds+'T00:00:00');satDate.setDate(satDate.getDate()-1);
+    const satDs=satDate.toISOString().slice(0,10);
+    return getVehForDay(driverId,satDs).replace('|PERIOD_START','|PERIOD');
+  }
+
   // Vérifier d'abord si une attribution de période couvre ce jour
   // Les vehPeriod ont priorité sur tout le reste
-  const period=(G.vehPeriod||[]).find(p=>p.driverId===driverId&&ds>=p.debut&&ds<=p.fin);
+  const matchingPeriods=(G.vehPeriod||[]).filter(p=>p.driverId===driverId&&ds>=p.debut&&ds<=p.fin);
+  const period=matchingPeriods.length>1
+    ?matchingPeriods.slice().sort((a,b)=>b.debut.localeCompare(a.debut)||(b.ts||'').localeCompare(a.ts||''))[0] // la période qui a COMMENCÉ le plus tard l'emporte (plus fiable que la date de saisie)
+    :matchingPeriods[0];
   if(period){
     // Premier jour de la période → marquer comme nouveau
     const isPeriodStart=(ds===period.debut);
@@ -4928,7 +5004,7 @@ function getVehForDay(driverId, ds){
       const date=h.ts?h.ts.slice(0,10):'';
       if(date)timeline.push({ts:h.ts,date,type:'release',vehApres:null,vehAvant:h.veh});
     }
-    if(h.type==='assign'&&h.driverId===driverId){
+    if(h.type==='assign'&&h.driverId===driverId&&!h.periodOnly){
       const date=h.ts?h.ts.slice(0,10):'';
       // Ne pas ajouter si un swap existe déjà au même timestamp (évite le doublon)
       const alreadyInSwaps=(G.vehSwaps||[]).some(s=>
@@ -4985,6 +5061,9 @@ function getVehForDay(driverId, ds){
     return'|LIBRE';
   }
   if(!veh||veh==='—')return'|LIBRE';
+  // Si ce camion est actuellement prêté à un AUTRE chauffeur via une période active, ce chauffeur ne l'a pas ce jour-là
+  const loanedOut=(G.vehPeriod||[]).some(p=>p.vehId===veh&&p.driverId!==driverId&&ds>=p.debut&&ds<=p.fin);
+  if(loanedOut)return'|LIBRE';
   return veh+(isSwapDay?'|SWAP':'');
 }
 
@@ -5585,6 +5664,28 @@ dbLoad().then(async ()=>{
     }
   });
   if(repaired){console.log('Conflits d\'attribution camion corrigés ✓');await dbSave();}
+
+  // Réparation : périodes d'attribution camion en doublon ou qui se chevauchent pour un même chauffeur
+  // (garde la période dont la date de DÉBUT est la plus tardive quand deux périodes se recoupent — plus fiable que la date de saisie)
+  let repairedPeriods=false;
+  if(G.vehPeriod&&G.vehPeriod.length){
+    const byDriver={};
+    G.vehPeriod.forEach(p=>{(byDriver[p.driverId]=byDriver[p.driverId]||[]).push(p);});
+    const kept=[];
+    Object.values(byDriver).forEach(periods=>{
+      periods.sort((a,b)=>a.debut.localeCompare(b.debut)||(a.ts||'').localeCompare(b.ts||'')); // débuts les plus anciens d'abord
+      const keptForDriver=[];
+      periods.forEach(p=>{
+        for(let i=keptForDriver.length-1;i>=0;i--){
+          const k=keptForDriver[i];
+          if(k.debut<=p.fin&&k.fin>=p.debut){keptForDriver.splice(i,1);repairedPeriods=true;} // p (début plus tardif) l'emporte
+        }
+        keptForDriver.push(p);
+      });
+      kept.push(...keptForDriver);
+    });
+    if(repairedPeriods){G.vehPeriod=kept;console.log('Périodes d\'attribution en doublon/chevauchement corrigées ✓');await dbSave();}
+  }
 
   document.getElementById('loading').style.display='none';
   document.getElementById('app').style.display='flex';
