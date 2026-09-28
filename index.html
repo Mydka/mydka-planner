@@ -257,7 +257,8 @@ button{cursor:pointer;font-family:inherit}
         <label style="width:100%;padding:8px 10px;margin-top:5px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:7px;color:#16A34A;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">&#128229; Importer données<input type="file" accept=".json" style="display:none" onchange="importDataJSON(this)"></label>
         <div id="sb-status" style="margin-top:6px;text-align:center;font-size:9px;color:#4B5563">&#9679; Connexion Supabase...</div>
         <div onclick="openAutoBackupSettings()" style="margin-top:6px;text-align:center;font-size:9px;color:#6B7280;cursor:pointer;text-decoration:underline">&#9881; Sauvegarde auto du soir</div>
-        <div style="margin-top:4px;text-align:center;font-size:8px;color:#374151">Version 2026-09-21-b</div>
+        <div id="sb-backup" style="margin-top:4px;text-align:center;font-size:9px;color:#6B7280;cursor:pointer;line-height:1.3"></div>
+        <div style="margin-top:4px;text-align:center;font-size:8px;color:#374151">Version 2026-09-24-d</div>
     </div>
   </div>
   <div class="content" id="content"></div>
@@ -364,6 +365,26 @@ async function dbSave(){
   syncBackupFolderDebounced();
 }
 let _syncFolderTimer=null;
+// Refuse d'écrire une sauvegarde si les données semblent vides/incomplètes (évite d'écraser une bonne sauvegarde par du vide)
+function backupDataLooksEmpty(){
+  return !!window.__DB_LOAD_ERROR__||!G.drivers||!G.drivers.length||!G.aff||Object.keys(G.aff).length===0;
+}
+async function getBackupFolderState(){
+  const handle=await _abGetHandle();
+  if(!handle)return {handle:null,perm:null};
+  let perm='denied';
+  try{perm=await handle.queryPermission({mode:'readwrite'});}catch(e){}
+  return {handle,perm};
+}
+// Écrit le vrai instantané (données intégrées) dans le fichier "dernière sauvegarde" du dossier choisi
+async function syncBackupNow(gesture){
+  if(window.__SNAPSHOT_DATA__)return false;
+  if(backupDataLooksEmpty()){console.warn('Sauvegarde dossier ignorée : données vides ou incomplètes');return false;}
+  const html=buildStaticSnapshotHtml();
+  const ok=await writeBackupToFolder(html,_abFixedFilename,gesture);
+  if(ok){const d=new Date();localStorage.setItem('tp_backup_lastwrite',localTodayStr()+' '+d.toTimeString().slice(0,5));}
+  return ok;
+}
 function syncBackupFolderDebounced(){
   // Anti-rebond : évite d'écrire sur le disque à chaque toute petite modification rapprochée
   if(_syncFolderTimer)clearTimeout(_syncFolderTimer);
@@ -371,11 +392,41 @@ function syncBackupFolderDebounced(){
     try{
       const handle=await _abGetHandle();
       if(!handle)return; // aucun dossier choisi — rien à synchroniser en direct
-      const html=document.documentElement.outerHTML;
-      const ok=await writeBackupToFolder(html,_abFixedFilename,false); // pas de geste utilisateur ici : uniquement si la permission est déjà acquise
-      if(ok)console.log('Sauvegarde synchronisée dans le dossier ✓');
+      await syncBackupNow(false); // pas de geste utilisateur ici : uniquement si la permission est déjà acquise
+      updateBackupStatus();
     }catch(e){console.warn('syncBackupFolderDebounced error',e);}
   },2000);
+}
+// Voyant d'état de la sauvegarde dans la barre latérale
+async function updateBackupStatus(){
+  const el=document.getElementById('sb-backup');if(!el)return;
+  if(window.__SNAPSHOT_DATA__){el.style.display='none';return;}
+  try{
+    const st=await getBackupFolderState();
+    const last=localStorage.getItem('tp_backup_lastwrite');
+    if(!st.handle){
+      el.innerHTML='&#128190; Sauvegarde : par téléchargement (aucun dossier choisi)';
+      el.style.color='#6B7280';el.onclick=openAutoBackupSettings;
+    } else if(st.perm==='granted'){
+      el.innerHTML='&#9989; Dossier « '+st.handle.name+' »'+(last?' — écrit à '+last.slice(11):'');
+      el.style.color='#16A34A';el.onclick=openAutoBackupSettings;
+    } else {
+      el.innerHTML='&#9888; Dossier « '+st.handle.name+' » inactif — cliquez ici pour le réactiver';
+      el.style.color='#F59E0B';el.onclick=reauthorizeBackupFolder;
+    }
+  }catch(e){}
+}
+// Après un redémarrage du navigateur, la permission du dossier doit être redonnée par un clic (règle de sécurité du navigateur)
+async function reauthorizeBackupFolder(){
+  const st=await getBackupFolderState();
+  if(!st.handle){openAutoBackupSettings();return;}
+  let perm=st.perm;
+  try{if(perm!=='granted')perm=await st.handle.requestPermission({mode:'readwrite'});}catch(e){}
+  if(perm==='granted'){
+    const ok=await syncBackupNow(true);
+    toast(ok?'&#9989; Dossier réactivé — sauvegarde mise à jour':'Dossier réactivé');
+  } else toast('&#9888; Permission refusée — le dossier reste inactif');
+  updateBackupStatus();
 }
 async function dbLoad(){
   if(window.__SNAPSHOT_DATA__){
@@ -482,6 +533,10 @@ function gStat(ds,id){
 const gTP=(ds,cid,period)=>{const key=ds+'_'+cid+(period==='PM'?'_PM':'');return G.tours_prov[key]!==undefined?G.tours_prov[key]:null;};
 const sTP=(ds,cid,val,period)=>{G.tours_prov[ds+'_'+cid+(period==='PM'?'_PM':'')]=val;};
 const getAff=(ds,id,period)=>period==='PM'?(G.aff[ds+'_'+id+'_PM']||null):(G.aff[ds+'_'+id]||null);
+// Date du jour au format 'YYYY-MM-DD' en heure LOCALE (toISOString donnerait la veille entre minuit et 2h en France)
+function localTodayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+// Ajoute n jours à une date 'YYYY-MM-DD' sans dépendre du fuseau horaire du navigateur
+function dsAddDays(ds,n){const p=ds.split('-').map(Number);const t=new Date(Date.UTC(p[0],p[1]-1,p[2]+n));return t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');}
 const getAffHeure=(ds,id,period)=>{if(!G.affHeure)return null;const k=ds+'_'+id+(period==='PM'?'_PM':'_AM');return G.affHeure[k]||null;};
 const setAffHeure=(ds,id,period,val)=>{if(!G.affHeure)G.affHeure={};const k=ds+'_'+id+(period==='PM'?'_PM':'_AM');if(val)G.affHeure[k]=val;else delete G.affHeure[k];};
 const setAff=(ds,id,cid,period)=>{if(period==='PM')G.aff[ds+'_'+id+'_PM']=cid;else G.aff[ds+'_'+id]=cid;};
@@ -526,7 +581,7 @@ const cfTot=id=>cf(id)+cfPM(id);
 function getNbToursMoisG(driverId,y,m){
   const dim=new Date(y,m+1,0).getDate();
   const MM=String(m+1).padStart(2,'0');
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   let n=0;
   for(let d=1;d<=dim;d++){
     const ds=y+'-'+MM+'-'+String(d).padStart(2,'0');
@@ -541,7 +596,7 @@ function getNbToursMoisG(driverId,y,m){
 function getCAMoisG(y,m){
   const dim=new Date(y,m+1,0).getDate();
   const MM=String(m+1).padStart(2,'0');
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   let total=0;
   G.drivers.forEach(dr=>{
     for(let d=1;d<=dim;d++){
@@ -579,7 +634,7 @@ function getCoutSalarialMoisG(driverId,y,m){
 function getAjustMoisTotalG(driverId,y,m){
   const dim=new Date(y,m+1,0).getDate();
   const MM=String(m+1).padStart(2,'0');
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   let tot=0;
   for(let d=1;d<=dim;d++){
     const ds=y+'-'+MM+'-'+String(d).padStart(2,'0');
@@ -592,7 +647,7 @@ function getAjustMoisTotalG(driverId,y,m){
 function getAcomptesMoisTotalG(driverId,y,m){
   const MM=String(m+1).padStart(2,'0');
   const prefix=y+'-'+MM;
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   return (G.retenues||[]).filter(a=>a.driverId===driverId&&a.date&&a.date.startsWith(prefix)&&a.date<=todayStr).reduce((s,a)=>s+(parseFloat(a.montant)||0),0);
 }
 function getNetAPayerMoisG(driverId,y,m){
@@ -612,7 +667,7 @@ function getRetenuesHistoriqueG(driverId){
 }
 // Total déjà retenu à ce jour (toutes les retenues datées aujourd'hui ou avant)
 function getAcomptesRetenuCumulG(driverId){
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   return getRetenuesHistoriqueG(driverId).filter(a=>a.date&&a.date<=todayStr).reduce((s,a)=>s+(parseFloat(a.montant)||0),0);
 }
 // Solde restant à retenir = total donné - total déjà retenu (peu importe le mois)
@@ -914,7 +969,7 @@ function exportTableauExcel(){
   const y=G.y,m=G.m,MM=String(m+1).padStart(2,'0');
   const dim=new Date(y,m+1,0).getDate();
   const allPlan=planDriversVisible();
-  const today0=new Date().toISOString().slice(0,10);
+  const today0=localTodayStr();
 
   // ── Feuille 1 : Tableau des affectations ─────────────────────────────────
   const wsData=[];
@@ -1053,7 +1108,7 @@ function exportDataJSON(){
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url;a.download='mydka_data_'+new Date().toISOString().slice(0,10)+'.json';
+  a.href=url;a.download='mydka_data_'+localTodayStr()+'.json';
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   URL.revokeObjectURL(url);
   toast('&#128228; Données exportées ✓ — importez ce fichier sur l\'autre appareil');
@@ -1162,6 +1217,7 @@ function buildSnapshotDataObject(){
     statuts:G.statuts, tours_prov:G.tours_prov, manualDays:G.manualDays||{},
     ajustSalaire:G.ajustSalaire||{}, acomptes:G.acomptes||[], retenues:G.retenues||[],
     aff:G.aff, affExtra:G.affExtra||{}, affPrix:G.affPrix||{}, affHeure:G.affHeure||{},
+    keyTours:G.keyTours||{},
     ac:G.ac||[]
   };
 }
@@ -1170,51 +1226,32 @@ function buildStaticSnapshotHtml(){
   // Ouvrir ce fichier plus tard montre TOUJOURS l'état d'aujourd'hui, même hors-ligne, même après
   // que les vraies données en ligne aient changé.
   let html=document.documentElement.outerHTML;
-  const dateStr=fmtDate(new Date().toISOString().slice(0,10))+' '+new Date().toTimeString().slice(0,5);
+  const dateStr=fmtDate(localTodayStr())+' '+new Date().toTimeString().slice(0,5);
   const dataJson=JSON.stringify(buildSnapshotDataObject()).replace(/</g,'\\u003c'); // évite de casser le HTML sur la balise de script
   const injection='<script>window.__SNAPSHOT_DATA__='+dataJson+';window.__SNAPSHOT_DATE__='+JSON.stringify(dateStr)+';<'+'/script>';
-  html=html.replace('<head>','<head>'+injection);
-  html=html.replace(/<title>[^<]*<\/title>/,'<title>TourPlanner — Archive du '+dateStr+'</title>');
+  html=html.replace('<head>',()=>'<head>'+injection); // fonction de remplacement : évite l'interprétation des $ dans les données
+  html=html.replace(/<title>[^<]*<\/title>/,()=>'<title>TourPlanner — Archive du '+dateStr+'</title>');
   return html;
 }
 // Bouton manuel "Sauvegarder mois" : TOUJOURS un téléchargement classique, jamais dans le dossier auto
-async function manualSaveMois(){
-  const html=buildStaticSnapshotHtml();
-  const moisNom=MFR[G.m]||'Mois';
-  const annee=G.y;
-  const nomTelechargement='TourPlanner_'+moisNom+'_'+annee+'.html';
+function downloadHtmlFile(html,nom){
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url;a.download=nomTelechargement;
+  a.href=url;a.download=nom;
   document.body.appendChild(a);a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function manualSaveMois(){
+  if(backupDataLooksEmpty()&&!confirm('Les données affichées semblent vides ou incomplètes. Sauvegarder quand même ? (Cela pourrait remplacer une bonne sauvegarde par du vide.)'))return;
+  const html=buildStaticSnapshotHtml();
+  const nomTelechargement='TourPlanner_'+(MFR[G.m]||'Mois')+'_'+G.y+'.html';
+  downloadHtmlFile(html,nomTelechargement);
   toast('&#128190; '+nomTelechargement+' téléchargé — déposez-le dans OneDrive ✓');
 }
 // Sauvegarde automatique du soir (filet de sécurité) : écrit dans le dossier choisi si configuré, sinon télécharge
-async function exportMoisHTML(gesture){
-  if(gesture===undefined)gesture=true; // clic manuel par défaut = a le droit de redemander la permission
-  // Instantané figé (données intégrées) plutôt qu'une copie qui se resynchroniserait avec Supabase
-  const html=buildStaticSnapshotHtml();
-  const moisNom=MFR[G.m]||'Mois';
-  const annee=G.y;
-  const nomTelechargement='TourPlanner_'+moisNom+'_'+annee+'.html';
-  // Dans le dossier choisi : toujours le même nom, remplacé à chaque fois pour garder LA version finale
-  const wroteToFolder=await writeBackupToFolder(html,_abFixedFilename,gesture);
-  if(wroteToFolder){
-    toast('&#128190; Sauvegarde mise à jour dans le dossier choisi ✓');
-    return;
-  }
-  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;a.download=nomTelechargement;
-  document.body.appendChild(a);a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  toast('&#128190; '+nomTelechargement+' téléchargé — déposez-le dans OneDrive ✓');
-}
+async function exportMoisHTML(gesture){return runEveningBackup(gesture!==false);}
 function toast(msg){const w=document.getElementById('toast-c'),t=document.createElement('div');t.className='toastm';t.textContent=msg;w.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},2600);}
 // ── Sauvegarde automatique du soir ────────────────────────────────────────
 // Limite technique : ceci ne peut se déclencher que si l'onglet est ouvert dans le
@@ -1292,7 +1329,7 @@ async function writeDatedBackupToFolder(content,gesture){
     let perm=await handle.queryPermission({mode:'readwrite'});
     if(perm!=='granted'&&gesture){perm=await handle.requestPermission({mode:'readwrite'});}
     if(perm!=='granted')return false;
-    const dateStr=new Date().toISOString().slice(0,10);
+    const dateStr=localTodayStr();
     const dayFolder=await handle.getDirectoryHandle(dateStr,{create:true});
     const fileHandle=await dayFolder.getFileHandle('TourPlanner_'+dateStr+'.html',{create:true});
     const writable=await fileHandle.createWritable();
@@ -1301,18 +1338,49 @@ async function writeDatedBackupToFolder(content,gesture){
     return true;
   }catch(e){console.warn('writeDatedBackupToFolder error',e);return false;}
 }
+// Fait la sauvegarde du soir. Retourne true seulement si une sauvegarde a RÉELLEMENT été produite
+// (dossier daté écrit, ou téléchargement de secours) — sinon la tentative sera refaite plus tard
+async function runEveningBackup(gesture){
+  if(backupDataLooksEmpty()){
+    console.warn('Sauvegarde du soir reportée : données vides ou incomplètes');
+    if(!window.__warnedEmptyBackup){window.__warnedEmptyBackup=true;toast('&#9888; Sauvegarde du soir non faite : données vides ou incomplètes (rechargez la page)');}
+    return false;
+  }
+  const html=buildStaticSnapshotHtml();
+  const dateStr=localTodayStr();
+  const st=await getBackupFolderState();
+  if(st.handle){
+    await writeBackupToFolder(html,_abFixedFilename,gesture);
+    const okDated=await writeDatedBackupToFolder(html,gesture);
+    if(okDated){
+      localStorage.setItem('tp_backup_lastwrite',dateStr+' '+new Date().toTimeString().slice(0,5));
+      toast('&#128190; Sauvegarde du soir archivée dans le dossier « '+st.handle.name+' » ✓');
+      updateBackupStatus();
+      return true;
+    }
+    // Dossier inaccessible (permission perdue) : filet de sécurité = téléchargement, avec alerte claire
+    downloadHtmlFile(html,'TourPlanner_'+dateStr+'.html');
+    toast('&#9888; Dossier inaccessible — sauvegarde téléchargée à la place. Réactivez le dossier via l\'alerte en bas à gauche.');
+    updateBackupStatus();
+    return true;
+  }
+  downloadHtmlFile(html,'TourPlanner_'+dateStr+'.html');
+  toast('&#128190; Sauvegarde du soir téléchargée ✓');
+  return true;
+}
 function checkAutoBackupSoir(){
   try{
     if(localStorage.getItem('tp_autobackup_enabled')==='0')return;
     const now=new Date();
-    const todayStr=now.toISOString().slice(0,10);
+    const todayStr=localTodayStr();
     const heureCible=parseInt(localStorage.getItem('tp_autobackup_heure')||'20',10);
     if(now.getHours()<heureCible)return;
     if(localStorage.getItem('tp_autobackup_last')===todayStr)return;
-    exportMoisHTML(false);
-    // En plus du fichier toujours à jour, garder une copie datée dans son propre dossier (historique récupérable)
-    writeDatedBackupToFolder(buildStaticSnapshotHtml(),false);
-    localStorage.setItem('tp_autobackup_last',todayStr);
+    if(window.__eveningRunning)return;
+    window.__eveningRunning=true;
+    runEveningBackup(false).then(done=>{
+      if(done)localStorage.setItem('tp_autobackup_last',todayStr);
+    }).catch(e=>console.warn('runEveningBackup error',e)).finally(()=>{window.__eveningRunning=false;});
   }catch(e){console.warn('checkAutoBackupSoir error',e);}
 }
 async function openAutoBackupSettings(){
@@ -1346,13 +1414,16 @@ async function openAutoBackupSettings(){
   );
 }
 async function testDatedBackupNow(){
+  if(backupDataLooksEmpty()){toast('&#9888; Données vides ou incomplètes — sauvegarde annulée');return;}
   const html=buildStaticSnapshotHtml();
+  await writeBackupToFolder(html,_abFixedFilename,true);
   const ok=await writeDatedBackupToFolder(html,true); // gesture=true : ce clic a le droit de redemander la permission
   if(ok){
-    toast('&#128193; Sauvegarde datée créée (dossier '+new Date().toISOString().slice(0,10)+') ✓');
+    toast('&#128193; Sauvegarde datée créée (dossier '+localTodayStr()+') ✓');
   } else {
     toast('&#9888; Échec — vérifiez le dossier choisi');
   }
+  updateBackupStatus();
 }
 function confAutoBackupSettings(){
   localStorage.setItem('tp_autobackup_enabled',document.getElementById('ab-enabled').value);
@@ -1413,7 +1484,7 @@ function rPlanning(c){
   const td=new Date(),isT=d=>td.getFullYear()===y&&td.getMonth()===m&&td.getDate()===d;
   const allPlan=planDrivers();
   let alertsHtml='';
-  const todayAlerts=new Date().toISOString().slice(0,10);
+  const todayAlerts=localTodayStr();
   // Alerte véhicules hors service
   const vehHS=G.veh.filter(v=>!v.actif);
   if(vehHS.length>0){
@@ -1447,7 +1518,7 @@ function rPlanning(c){
     const chColor=nbPres>=9?'#16A34A':nbPres>=7?'#D97706':'#DC2626';
     const isManual=(G.manualDays||{})[ds];
     // Chauffeurs présents assignés sans camion (libéré)
-    const today0=new Date().toISOString().slice(0,10);
+    const today0=localTodayStr();
     const sansVehJ=presentsDs(ds).filter(dr=>{
       if(!getAff(ds,dr.id))return false;
       const v=getVehForDay(dr.id,ds);
@@ -1471,7 +1542,7 @@ function openDayMo(ds){
   const allPlan=planDrivers(),nbPres=presentsDs(ds).length,totalT=toursDay(ds);
   const groupAbs={};allPlan.forEach(dr=>{const s=gStat(ds,dr.id);if(s!=='present'){if(!groupAbs[s])groupAbs[s]=0;groupAbs[s]++;}});
   // Compter camions HS et sans camion pour ce jour
-  const today3=new Date().toISOString().slice(0,10);
+  const today3=localTodayStr();
   const nbVehHS=nbVehHSJour(ds);
   const nbSansCamion=allPlan.filter(dr=>{
     if(gStat(ds,dr.id)!=='present')return false;
@@ -1526,7 +1597,7 @@ function openDayMo(ds){
     }).join('')
     +'</div></div>':'';
   // Calculer le nb réel de tournées depuis les affectations existantes
-  const today0mo=new Date().toISOString().slice(0,10);
+  const today0mo=localTodayStr();
   const hasAff=Object.keys(G.aff).some(k=>k.startsWith(ds+'_')&&G.aff[k]);
   const clientRows=G.clients.map(cl=>{
     const provAM=gTP(ds,cl.id,'AM');
@@ -1677,7 +1748,7 @@ function saveDayMo(ds){
     const inpPM=document.getElementById('tp-'+ds+'-'+cl.id+'-PM');if(inpPM)sTP(ds,cl.id,parseInt(inpPM.value)||0,'PM');
   });
   const isSun=new Date(ds+'T00:00:00').getDay()===0;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   const isPast=ds<today;
   if(isPast){
     // Jour passé : sauvegarder SANS re-dispatcher — conserver les affectations existantes
@@ -1718,6 +1789,7 @@ function unprotectDay(ds){
 
 // ── Tournée de retour des clés (dépôt) ────────────────────────────────────
 function getKeyTourDrivers(ds){
+  // Chauffeurs réellement planifiés Foodflow CE JOUR-LÀ (présents, AM/PM/extra)
   const ids=[];
   planDrivers().forEach(dr=>{
     if(dr.statut==='inactif')return;
@@ -1728,48 +1800,67 @@ function getKeyTourDrivers(ds){
   });
   return ids;
 }
-// Nombre de fois où chaque chauffeur a déjà été désigné "collecteur" (toutes dates enregistrées, hors le jour ds lui-même)
+// Tous les chauffeurs "de Foodflow" : ceux qui ont eu au moins une tournée Foodflow autour de cette date
+// (60 jours avant → 30 jours après), planifiés ou non le jour concerné
+function getFoodflowPool(ds){
+  const ids=[];
+  planDrivers().forEach(dr=>{
+    if(dr.statut==='inactif')return;
+    for(let k=-60;k<=30;k++){
+      const d2=dsAddDays(ds,k);
+      if(getAff(d2,dr.id,'AM')==='FO'||getAff(d2,dr.id,'PM')==='FO'||getAffExtra(d2,dr.id).some(e=>e.clientId==='FO')){ids.push(dr.id);break;}
+    }
+  });
+  return ids;
+}
+// Nombre de fois où chaque chauffeur a été collecteur AVANT la date donnée (historique pour l'équité)
 function getKeyTourCollectorCounts(excludeDs){
   const counts={};
   if(!G.keyTours)return counts;
   Object.keys(G.keyTours).forEach(ds2=>{
-    if(ds2===excludeDs)return;
+    if(excludeDs&&ds2>=excludeDs)return;
     const kt=G.keyTours[ds2];
     if(kt&&kt.collectorId)counts[kt.collectorId]=(counts[kt.collectorId]||0)+1;
   });
   return counts;
 }
-// Répartition équitable : celui qui a été le MOINS souvent collecteur récemment est désigné aujourd'hui
+// Construit / met à jour la tournée d'un jour : tous les chauffeurs Foodflow (planifiés ou non) + ajouts manuels - retraits manuels
+function computeKeyTour(ds,resetAll){
+  if(!G.keyTours)G.keyTours={};
+  const old=resetAll?{}:(G.keyTours[ds]||{});
+  const removed=(old.removed||[]).slice();
+  const extra=(old.extra||[]).slice();
+  const valid=new Set(planDrivers().map(d=>d.id));
+  const sched=getKeyTourDrivers(ds);
+  const pool=[...new Set([...getFoodflowPool(ds),...extra,...sched])].filter(id=>valid.has(id)&&!removed.includes(id));
+  let order=(old.order||[]).filter(id=>pool.includes(id));
+  pool.forEach(id=>{if(!order.includes(id))order.push(id);});
+  let collector=old.collectorId;
+  const needCollector=!collector||!pool.includes(collector);
+  if(needCollector||!old.order){
+    // Collecteur équitable : parmi ceux qui travaillent ce jour-là, celui qui l'a été le moins souvent
+    const counts=getKeyTourCollectorCounts(ds);
+    const cands=sched.filter(id=>pool.includes(id));
+    const base=(cands.length?cands:pool).slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
+    collector=base.length?base[0]:null;
+    const rest=pool.filter(id=>id!==collector);
+    order=[...rest.filter(id=>sched.includes(id)),...rest.filter(id=>!sched.includes(id)),...(collector?[collector]:[])];
+  }
+  G.keyTours[ds]={order,collectorId:collector,removed,extra};
+  return G.keyTours[ds];
+}
 function autoBalanceKeyTour(ds){
   if(!G.keyTours)G.keyTours={};
-  const availableIds=getKeyTourDrivers(ds);
-  if(!availableIds.length)return;
-  const counts=getKeyTourCollectorCounts(ds);
-  const sorted=availableIds.slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
-  const fairCollector=sorted[0];
-  const rest=availableIds.filter(id=>id!==fairCollector);
-  G.keyTours[ds]={order:[...rest,fairCollector],collectorId:fairCollector};
+  const prev=G.keyTours[ds]||{};
+  // Recalcule le collecteur équitablement en gardant les ajouts/retraits manuels
+  G.keyTours[ds]={removed:prev.removed||[],extra:prev.extra||[]};
+  computeKeyTour(ds,false);
   dbSave();
   renderKeyTourModal(ds);
   toast('&#9878;&#65039; Répartition équitable appliquée ✓');
 }
 function openKeyTour(ds){
-  if(!G.keyTours)G.keyTours={};
-  const availableIds=getKeyTourDrivers(ds);
-  let kt=G.keyTours[ds];
-  if(!kt){
-    // Première ouverture pour ce jour : répartir équitablement d'entrée (au lieu de toujours prendre le dernier de la liste)
-    const counts=getKeyTourCollectorCounts(ds);
-    const sorted=availableIds.slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
-    const fairCollector=sorted.length?sorted[0]:null;
-    const rest=availableIds.filter(id=>id!==fairCollector);
-    kt={order:fairCollector?[...rest,fairCollector]:availableIds.slice(),collectorId:fairCollector};
-  } else {
-    kt.order=kt.order.filter(id=>availableIds.includes(id));
-    availableIds.forEach(id=>{if(!kt.order.includes(id))kt.order.push(id);});
-    if(!kt.collectorId||!availableIds.includes(kt.collectorId))kt.collectorId=kt.order.length?kt.order[kt.order.length-1]:null;
-  }
-  G.keyTours[ds]=kt;
+  computeKeyTour(ds,false);
   window._keyTourDs=ds;
   renderKeyTourModal(ds);
 }
@@ -1778,24 +1869,40 @@ function renderKeyTourModal(ds){
   const dObj=new Date(ds+'T00:00:00');
   const jourLabel=DFR[dObj.getDay()]+' '+pd(dObj.getDate())+'/'+pd(dObj.getMonth()+1);
   const counts=getKeyTourCollectorCounts(ds);
+  const sched=getKeyTourDrivers(ds);
   const rows=kt.order.length?kt.order.map((id,i)=>{
     const dr=G.drivers.find(d=>d.id===id);
     const isCollector=kt.collectorId===id;
     const cnt=counts[id]||0;
-    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:'+(isCollector?'#F0FDF4':'#F9FAFB')+';border:1px solid '+(isCollector?'#BBF7D0':'#E5E7EB')+';border-radius:7px;margin-bottom:5px">'
-      +'<span style="width:20px;height:20px;border-radius:50%;background:#16A34A;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(i+1)+'</span>'
-      +'<span style="flex:1;font-size:12px;font-weight:600">'+(dr?dr.nom:'?')+'</span>'
-      +'<span style="font-size:9px;color:#9CA3AF" title="Nombre de fois collecteur récemment">&#128273;&times;'+cnt+'</span>'
-      +(isCollector?'<span style="font-size:9px;font-weight:700;color:#16A34A;background:#DCFCE7;padding:2px 7px;border-radius:4px">&#128273; Ramène tout au dépôt</span>':'')
+    const isSched=sched.includes(id);
+    const stat=gStat(ds,id);
+    let tag='';
+    if(!isSched){
+      const lbl=stat==='absent'?'Absent':stat==='conge'?'Congé':stat==='maladie'?'Maladie':'Non planifié ce jour';
+      tag='<span style="font-size:9px;font-weight:700;color:#6B7280;background:#E5E7EB;padding:2px 6px;border-radius:4px;white-space:nowrap">'+lbl+'</span>';
+    }
+    return '<div style="display:flex;align-items:center;gap:6px;padding:7px 8px;background:'+(isCollector?'#F0FDF4':isSched?'#F9FAFB':'#F3F4F6')+';border:1px solid '+(isCollector?'#BBF7D0':'#E5E7EB')+';border-radius:7px;margin-bottom:5px;'+(isSched?'':'opacity:.85')+'">'
+      +'<span style="width:20px;height:20px;border-radius:50%;background:'+(isSched?'#16A34A':'#9CA3AF')+';color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(i+1)+'</span>'
+      +'<span style="flex:1;font-size:12px;font-weight:600;min-width:0">'+(dr?dr.nom:'?')+'</span>'
+      +tag
+      +'<span style="font-size:9px;color:#9CA3AF" title="Nombre de fois collecteur avant ce jour">&#128273;&times;'+cnt+'</span>'
+      +(isCollector?'<span style="font-size:9px;font-weight:700;color:#16A34A;background:#DCFCE7;padding:2px 7px;border-radius:4px;white-space:nowrap">&#128273; Ramène tout au dépôt</span>':'')
       +'<button onclick="moveKeyTour(\''+ds+'\','+i+',-1)" '+(i===0?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8593;</button>'
       +'<button onclick="moveKeyTour(\''+ds+'\','+i+',1)" '+(i===kt.order.length-1?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8595;</button>'
       +'<button onclick="setKeyTourCollector(\''+ds+'\','+id+')" title="Désigner comme collecteur (ramène tout au dépôt)" style="width:22px;height:22px;border:1px solid '+(isCollector?'#16A34A':'#D1D5DB')+';background:'+(isCollector?'#16A34A':'#fff')+';color:'+(isCollector?'#fff':'#9CA3AF')+';border-radius:5px;cursor:pointer;font-size:11px">&#128273;</button>'
+      +'<button onclick="removeKeyTourDriver(\''+ds+'\','+id+')" title="Retirer de la tournée de ce jour" style="width:22px;height:22px;border:1px solid #FECACA;background:#FEF2F2;color:#DC2626;border-radius:5px;cursor:pointer;font-size:11px">&#10005;</button>'
     +'</div>';
-  }).join(''):'<div style="font-size:12px;color:#9CA3AF;text-align:center;padding:14px">Aucun chauffeur Foodflow ce jour-là</div>';
+  }).join(''):'<div style="font-size:12px;color:#9CA3AF;text-align:center;padding:14px">Aucun chauffeur Foodflow</div>';
+  const addable=planDrivers().filter(d=>!kt.order.includes(d.id));
+  const addSel=addable.length
+    ?'<div style="display:flex;gap:6px;margin-top:8px"><select class="fs" id="kt-add-sel" style="flex:1">'+addable.map(d=>'<option value="'+d.id+'">'+d.nom+'</option>').join('')+'</select>'
+      +'<button class="btn btn-out btn-sm" onclick="addKeyTourDriver(\''+ds+'\')">+ Ajouter</button></div>'
+    :'';
   showModal('&#128273; Tournée des clés — '+jourLabel,'',
-    '<div style="font-size:11px;color:#6B7280;margin-bottom:10px">Ordre de retour des clés au dépôt. Utilisez &#8593;&#8595; pour réordonner, et &#128273; pour désigner qui ramène toutes les clés au dépôt. Le nombre &#128273;&times; indique combien de fois chacun a déjà été collecteur.</div>'
-    +'<button onclick="autoBalanceKeyTour(\''+ds+'\')" style="width:100%;padding:6px;margin-bottom:10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:7px;color:#92400E;font-size:11px;font-weight:700;cursor:pointer">&#9878;&#65039; Répartir équitablement (celui qui a le moins collecté devient collecteur)</button>'
-    +'<div id="key-tour-rows">'+rows+'</div>',
+    '<div style="font-size:11px;color:#6B7280;margin-bottom:10px">Tous les chauffeurs Foodflow, planifiés ou non ce jour-là (les non planifiés sont en gris). &#8593;&#8595; pour réordonner, &#128273; pour désigner qui ramène toutes les clés au dépôt, &#10005; pour retirer quelqu\'un de ce jour. &#128273;&times;N = nombre de fois collecteur avant ce jour.</div>'
+    +'<button onclick="autoBalanceKeyTour(\''+ds+'\')" style="width:100%;padding:6px;margin-bottom:10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:7px;color:#92400E;font-size:11px;font-weight:700;cursor:pointer">&#9878;&#65039; Répartir équitablement (parmi ceux qui travaillent ce jour, celui qui a le moins collecté)</button>'
+    +'<div id="key-tour-rows" style="max-height:52vh;overflow-y:auto">'+rows+'</div>'
+    +addSel,
     '<button class="btn btn-out btn-sm" onclick="closeMo()">Fermer</button>'
     +'<button class="btn btn-or btn-sm" onclick="previewKeyTourWa(\''+ds+'\')">&#128241; Envoyer sur WhatsApp</button>');
 }
@@ -1808,6 +1915,23 @@ function moveKeyTour(ds,idx,dir){
 }
 function setKeyTourCollector(ds,driverId){
   G.keyTours[ds].collectorId=driverId;
+  dbSave();renderKeyTourModal(ds);
+}
+function removeKeyTourDriver(ds,driverId){
+  const kt=G.keyTours[ds];
+  kt.order=kt.order.filter(id=>id!==driverId);
+  kt.extra=(kt.extra||[]).filter(id=>id!==driverId);
+  if(!(kt.removed||[]).includes(driverId))kt.removed=[...(kt.removed||[]),driverId];
+  if(kt.collectorId===driverId)kt.collectorId=kt.order.length?kt.order[kt.order.length-1]:null;
+  dbSave();renderKeyTourModal(ds);
+}
+function addKeyTourDriver(ds){
+  const sel=document.getElementById('kt-add-sel');if(!sel)return;
+  const id=parseInt(sel.value);
+  const kt=G.keyTours[ds];
+  kt.removed=(kt.removed||[]).filter(x=>x!==id);
+  if(!(kt.extra||[]).includes(id))kt.extra=[...(kt.extra||[]),id];
+  if(!kt.order.includes(id))kt.order.unshift(id);
   dbSave();renderKeyTourModal(ds);
 }
 function buildKeyTourMessage(ds){
@@ -2255,7 +2379,7 @@ function buildTableauRows(y,m,allPlan,semaines,semStart,nbSem){
         return tdClass(cellAbs,'sep-am')+tdClass(cellAbs,'sep-pm');
       }
       // Vérifier si le chauffeur a un camion ce jour (un seul camion/jour, valable AM+PM)
-      const today2=new Date().toISOString().slice(0,10);
+      const today2=localTodayStr();
       const vehDrDay=getVehForDay(dr.id,ds);
       const noVehDay=vehDrDay==='|LIBRE'||vehDrDay.startsWith('|LIBEREJ')||!vehDrDay||vehDrDay==='—';
       // Camion hors service à partir d'aujourd'hui
@@ -2338,7 +2462,7 @@ function buildTableauRows(y,m,allPlan,semaines,semStart,nbSem){
     let totalCell='';
     if(!isDim){
       // Nb camions manquants (HS ou libérés) à partir d'aujourd'hui
-      const today1b=new Date().toISOString().slice(0,10);
+      const today1b=localTodayStr();
       const nbVehHSj=ds>=today1b?nbVehHSJour(ds):0;
       const nbSansVeh=ds>=today1b?allPlan.filter(dr=>{
         if(gStat(ds,dr.id)!=='present')return false;
@@ -2372,7 +2496,7 @@ function buildTableauRows(y,m,allPlan,semaines,semStart,nbSem){
     }
     const hasDimAff=isDim&&Object.keys(G.aff).filter(k=>k.startsWith(ds+'_')&&G.aff[k]).length>0;
     // Alerte camion manquant sur la ligne
-    const today1=new Date().toISOString().slice(0,10);
+    const today1=localTodayStr();
     const hasSansVeh=!isDim&&allPlan.some(dr=>{
       if(gStat(ds,dr.id)!=='present')return false;
       if(!getAff(ds,dr.id))return false;
@@ -2568,7 +2692,7 @@ function openVehDD(id,btn){
 // ═══════════════════════════════════════════════════════════════════════════
 function attribuerCamionPeriode(driverId){
   const dr=G.drivers.find(d=>d.id===driverId);if(!dr)return;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   // Grouper : actifs d'abord, puis hors service
   const vehActifs=G.veh.filter(v=>v.actif);
   const vehHors=G.veh.filter(v=>!v.actif);
@@ -2669,7 +2793,7 @@ function svAttrPeriode(){
   if(G.vehPeriod.length<before)console.log((before-G.vehPeriod.length)+' ancienne(s) période(s) chevauchante(s) remplacée(s)');
   // Enregistrer l'attribution de période
   G.vehPeriod.push({driverId:driverId,vehId:vehId,debut:d1,fin:d2,note:note,ts:ts});
-  var today=new Date().toISOString().slice(0,10);
+  var today=localTodayStr();
   // NB : on ne touche pas au camion principal (dr.veh) — c'est une attribution TEMPORAIRE.
   // Le chauffeur reprendra automatiquement son camion principal une fois la période terminée
   // (la case "Camion" du tableau va lire vehPeriod en priorité pour ces dates précises).
@@ -2699,7 +2823,7 @@ function delVehPeriod(i){
 
 function openStatutSortie(id){
   const d=G.drivers.find(x=>x.id===id);if(!d)return;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   showModal('&#128683; Arrêt de collaboration — '+d.nom,'',
     '<div class="fg"><label class="fl">Motif</label><select class="fs" id="sortie-motif">'
       +'<option value="Démission">Démission</option>'
@@ -2796,7 +2920,7 @@ function rChauffeurs(c){
     +'</div>'
     // Périodes d'attribution actives/futures
     +(function(){
-      var today=new Date().toISOString().slice(0,10);
+      var today=localTodayStr();
       var periods=(G.vehPeriod||[]).filter(function(p){return p.driverId===d.id&&p.fin>=today;});
       if(!periods.length)return '';
       return '<div style="margin:4px 0 2px;display:flex;flex-wrap:wrap;gap:3px">'
@@ -2963,7 +3087,7 @@ function svNom(id){
 }
 function hasFicheAlert(d){
   if(!d||!d.fiche)return false;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   const in60=new Date();in60.setDate(in60.getDate()+60);
   const in60Str=in60.toISOString().slice(0,10);
   const docs=['datePermis','dateCVExp','dateSSExp','dateContratFin','dateMedical'];
@@ -3231,7 +3355,7 @@ function rVehicules(c){
   }).join('');
 
   // Alertes entretiens + documents expirés
-  const today0=new Date().toISOString().slice(0,10);
+  const today0=localTodayStr();
   const in30=new Date(Date.now()+30*24*3600000).toISOString().slice(0,10);
   const in60=new Date(Date.now()+60*24*3600000).toISOString().slice(0,10);
   // Entretiens/vidange : rouge si ≤2 jours (ou en retard), orange si ≤5 jours
@@ -3539,7 +3663,7 @@ function svFicheVeh(vehId){
 function buildEntretiensCard(vehId){
   const v=(G.veh||[]).find(x=>x.id===vehId);
   const f=(v&&v.fiche)||{};
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   const in2=new Date(Date.now()+2*24*3600000).toISOString().slice(0,10);
   const in5=new Date(Date.now()+5*24*3600000).toISOString().slice(0,10);
 
@@ -3616,7 +3740,7 @@ function ackEntretien(idx){
 }
 function addEntretien(vehId){
   window._entVehId=vehId;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   showModal('&#128295; Entretien — '+vehId,'',
     '<div class="fg"><label class="fl">Type</label>'
       +'<select class="fs" id="ent-type">'
@@ -3690,7 +3814,7 @@ function openValiderEntretien(vehId,type){
   const v=(G.veh||[]).find(x=>x.id===vehId);if(!v)return;
   v.fiche=v.fiche||{};
   const f=v.fiche;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   window._validerVehId=vehId;
   window._validerType=type;
   const isVidange=type==='vidange';
@@ -3903,7 +4027,7 @@ function checkEntretiensJ2(){
 }
 function confirmSendJ2(){
   const indices=window._j2Indices||[];
-  const todayStr=window._j2todayStr||new Date().toISOString().slice(0,10);
+  const todayStr=window._j2todayStr||localTodayStr();
   indices.forEach(idx=>{
     if(idx<0||!G.entretiens[idx])return;
     const e=G.entretiens[idx];
@@ -3930,7 +4054,7 @@ function attribuerVehAChauf(vehId){
   var drvOpts=G.drivers.filter(function(d){return d.plan;}).map(function(d){
     return '<option value="'+d.id+'">'+(d.veh?'':'★ ')+d.nom+(d.veh?' ('+d.veh+')':' — sans camion')+'</option>';
   }).join('');
-  var today=new Date().toISOString().slice(0,10);
+  var today=localTodayStr();
   // Historique des chauffeurs ayant eu ce camion (assignations passées, plus récentes en premier)
   var principal=G.drivers.find(function(d){return d.veh===vehId;});
   var histAssigns=(G.vehHistory||[]).filter(function(h){return h.type==='assign'&&h.veh===vehId;})
@@ -3986,7 +4110,7 @@ function checkAttrVehSide(vehId){
   });
   // Si le camion actuel (hors période) est déjà attribué à un autre chauffeur
   var autreChauf=G.drivers.find(function(d){return d.veh===vehId&&d.id!==driverId;});
-  if(autreChauf&&d1<=new Date().toISOString().slice(0,10)){
+  if(autreChauf&&d1<=localTodayStr()){
     warns.push('<div class="attr-warn">&#9888; Ce camion est actuellement conduit par <strong>'+autreChauf.nom+'</strong> — il sera détaché automatiquement.</div>');
   }
   box.innerHTML=warns.join('')+(warns.length===0?'<div class="attr-ok">&#10003; Aucun conflit détecté</div>':'');
@@ -4000,7 +4124,7 @@ function confAttribuerVehAChauf(vehId){
   var dr=G.drivers.find(function(d){return d.id===driverId;});
   if(!dr||!d1){toast('Données manquantes');return;}
   var vehObj=G.veh.find(function(v){return v.id===vehId;});
-  var today=new Date().toISOString().slice(0,10);
+  var today=localTodayStr();
   // Remettre en service si hors service
   if(vehObj&&!vehObj.actif){vehObj.actif=true;}
   var ts=nowTs();
@@ -4040,7 +4164,7 @@ function libererVeh(i){
       +'Camion actuel : <strong>'+v.id+'</strong><br>'
       +'Conduit par : <strong>'+driverNom+'</strong>'
     +'</div>'
-    +'<div class="fg"><label class="fl">Date de libération</label><input class="fi" type="date" id="lib-date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+    +'<div class="fg"><label class="fl">Date de libération</label><input class="fi" type="date" id="lib-date" value="'+localTodayStr()+'"></div>'
     +'<div class="fg"><label class="fl">Heure</label><input class="fi" type="time" id="lib-heure" value="'+String(new Date().getHours()).padStart(2,'0')+':'+String(new Date().getMinutes()).padStart(2,'0')+'"></div>'
     +'<div class="fg"><label class="fl">Type entretien (optionnel)</label>'
     +'<input class="fi" id="lib-entretien" placeholder="Vidange, pneus, révision générale..." list="entretien-list">'
@@ -4154,7 +4278,7 @@ function fmtTs(ts){
 
 function addConge(){
   const drvOpts=G.drivers.filter(d=>d.plan).map(d=>`<option value="${d.id}">${d.nom}</option>`).join('');
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   showModal('Planifier un congé / absence','',
     `<div class="fg"><label class="fl">Chauffeur</label><select class="fs" id="cg-drv">${drvOpts}</select></div>
      <div class="fg"><label class="fl">Type</label>
@@ -4211,7 +4335,7 @@ function confDelConge(i){
 
 function redispatchPeriode(debut,fin){
   const d1=new Date(debut+'T00:00:00'),d2=new Date(fin+'T00:00:00');
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   const manualDays=G.manualDays||{};
   for(let d=new Date(d1);d<=d2;d.setDate(d.getDate()+1)){
     if(d.getDay()===0)continue; // dimanche ignoré
@@ -4362,7 +4486,7 @@ function rTarifs(c){
   if(!window._tarifTab)window._tarifTab='client'; // 'client' ou 'salarie'
 
   // ── Fonctions calcul ──────────────────────────────────────────────────────
-  const todayStrT=new Date().toISOString().slice(0,10);
+  const todayStrT=localTodayStr();
   function getTours(driverId, clientId, ds){
     if(ds>todayStrT)return 0; // jour futur : pas encore encaissé
     let n=0;
@@ -4841,7 +4965,7 @@ function delAjustSalaire(ds,driverId,idx){
 function openAcomptes(driverId){
   const dr=G.drivers.find(d=>d.id===driverId);if(!dr)return;
   window._acompteDrv=driverId;
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   if(!G.acomptes)G.acomptes=[];
   if(!G.retenues)G.retenues=[];
   const listAc=getAcomptesHistoriqueG(driverId); // acomptes donnés
@@ -5037,7 +5161,7 @@ function addVehSwap(preselId){
   const vehHorsS=G.veh.filter(v=>!v.actif);
   const vehOpts=(vehActifsS.length?'<optgroup label="Actifs">'+vehActifsS.map(v=>'<option value="'+v.id+'">'+v.id+'</option>').join('')+'</optgroup>':'')
     +(vehHorsS.length?'<optgroup label="Hors service (réparation)">'+vehHorsS.map(v=>'<option value="'+v.id+'">'+v.id+' — HS</option>').join('')+'</optgroup>':'');
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   showModal('&#8646; Échange de véhicule','',
     '<div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="sw-date" value="'+today+'"></div>'
     +'<div class="fg"><label class="fl">Heure</label><input class="fi" type="time" id="sw-heure" value="08:00"></div>'
@@ -5094,7 +5218,7 @@ function svVehSwap(){
   if(!date){toast('Date requise');return;}
   if(d1===d2){toast('Choisir 2 chauffeurs différents');return;}
   const ts=date+'T'+heure;
-  const today=new Date().toISOString().slice(0,10);
+  const today=localTodayStr();
   const dr1=G.drivers.find(d=>d.id===d1);
   const dr2=G.drivers.find(d=>d.id===d2);
   if(!G.vehSwaps)G.vehSwaps=[];
@@ -5127,8 +5251,7 @@ function getVehForDay(driverId, ds){
   // simplement le résultat calculé pour la veille (samedi), sans marquer un "début de période"
   const isSundayDs=new Date(ds+'T00:00:00').getDay()===0;
   if(isSundayDs){
-    const satDate=new Date(ds+'T00:00:00');satDate.setDate(satDate.getDate()-1);
-    const satDs=satDate.toISOString().slice(0,10);
+    const satDs=dsAddDays(ds,-1);
     return getVehForDay(driverId,satDs).replace('|PERIOD_START','|PERIOD');
   }
 
@@ -5166,7 +5289,7 @@ function getVehForDay(driverId, ds){
   }
   timeline.sort((a,b)=>a.ts.localeCompare(b.ts));
 
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=localTodayStr();
   let vehOrigin,timelineToReplay;
   if(ds>=todayStr){
     // Aujourd'hui/futur : dr.veh (l'état actuel) fait autorité.
@@ -5232,7 +5355,7 @@ function rStats(c){
   // ── Calcul tournées par chauffeur (mois sélectionné uniquement) ───────────
   const eq=eqScore();
   const allAff=G.drivers.reduce((s,d)=>s+getNbToursMoisG(d.id,y,m),0); // déjà effectuées (passé + aujourd'hui)
-  const todayStrStats=new Date().toISOString().slice(0,10);
+  const todayStrStats=localTodayStr();
   const allAffPrevu=(()=>{
     let n=0;
     const dimS=new Date(y,m+1,0).getDate(),MMs=String(m+1).padStart(2,'0');
@@ -5306,7 +5429,7 @@ function rStats(c){
       const cl2=aff2?G.clients.find(x=>x.id===aff2):null;
       const affPM2=getAff(ds2,d.id,'PM');
       const clPM2=affPM2?G.clients.find(x=>x.id===affPM2):null;
-      const tarifSalJ0=ds2>new Date().toISOString().slice(0,10)?0:parseFloat((G.tarifsSalarie||{})[d.id])||0;
+      const tarifSalJ0=ds2>localTodayStr()?0:parseFloat((G.tarifsSalarie||{})[d.id])||0;
       const montSuffix0=tarifSalJ0>0?' <span style="opacity:.85">'+tarifSalJ0.toFixed(0)+'€</span>':'';
       const pmChip=clPM2?'<div style="background:'+clPM2.color+';color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 3px;margin-top:1px;opacity:.9">'+clPM2.id+montSuffix0+'</div>':'';
       const hasSwap=(G.vehSwaps||[]).some(s=>s.date===ds2&&(s.d1===d.id||s.d2===d.id));
@@ -5325,7 +5448,7 @@ function rStats(c){
       if(stat2==='conge')   return '<td style="text-align:center;background:rgba(245,158,11,.12);padding:3px"><span style="font-size:9px;color:#92400E;font-weight:700">CG</span></td>';
       if(stat2==='absent')  return '<td style="text-align:center;background:rgba(239,68,68,.12);padding:3px"><span style="font-size:9px;color:#DC2626;font-weight:700">ABS</span></td>';
       // Montant salarial + ajustements + acomptes du jour (affichés sur toutes les cases, comme sur Tarifs) — sauf jour futur
-      const isFutureJ=ds2>new Date().toISOString().slice(0,10);
+      const isFutureJ=ds2>localTodayStr();
       const tarifSalJ=isFutureJ?0:parseFloat((G.tarifsSalarie||{})[d.id])||0;
       const ajustsJ=isFutureJ?[]:((G.ajustSalaire||{})[ds2+'_'+d.id])||[];
       const acomptesJ=isFutureJ?[]:(G.retenues||[]).filter(a=>a.driverId===d.id&&a.date===ds2);
@@ -5469,7 +5592,7 @@ function rStats(c){
     if(!d)return'<div style="color:#9CA3AF;padding:20px;text-align:center">Sélectionner un chauffeur</div>';
     const totalTours=getNbToursMoisG(d.id,y,m);
     const totalToursPrevu=(()=>{
-      let n=0;const dimD=new Date(y,m+1,0).getDate(),MMd=String(m+1).padStart(2,'0'),todayD=new Date().toISOString().slice(0,10);
+      let n=0;const dimD=new Date(y,m+1,0).getDate(),MMd=String(m+1).padStart(2,'0'),todayD=localTodayStr();
       for(let dd=1;dd<=dimD;dd++){
         const dsF=y+'-'+MMd+'-'+String(dd).padStart(2,'0');
         if(dsF<=todayD)continue;
@@ -5502,7 +5625,7 @@ function rStats(c){
     const histoAc=getAcomptesHistoriqueG(d.id).map(a=>({...a,type:'acompte'}));
     const histoRet=getRetenuesHistoriqueG(d.id).map(a=>({...a,type:'retenue'}));
     const histoAll=[...histoAc,...histoRet].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-    const todayStrAc=new Date().toISOString().slice(0,10);
+    const todayStrAc=localTodayStr();
     const histoBar=histoAll.length?'<div style="padding:8px 16px;background:#FFF7ED;border-bottom:1px solid #FED7AA;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px">'
       +'<span style="font-weight:700;color:#92400E">&#128176; Historique :</span>'
       +histoAll.map(a=>{
@@ -5688,7 +5811,7 @@ function rStats(c){
         if(selD2){
           const effD=getNbToursMoisG(selD2.id,y,m);
           const prevuD=(()=>{
-            let n=0;const dimD=new Date(y,m+1,0).getDate(),MMd=String(m+1).padStart(2,'0'),todayD=new Date().toISOString().slice(0,10);
+            let n=0;const dimD=new Date(y,m+1,0).getDate(),MMd=String(m+1).padStart(2,'0'),todayD=localTodayStr();
             for(let dd=1;dd<=dimD;dd++){
               const dsF=y+'-'+MMd+'-'+String(dd).padStart(2,'0');
               if(dsF<=todayD)continue;
@@ -5857,6 +5980,8 @@ dbLoad().then(async ()=>{
   setTimeout(checkEntretiensJ2,1200);
   setTimeout(checkDocumentsExpiration,2000);
   setTimeout(checkAutoBackupSoir,3000);
+  setTimeout(updateBackupStatus,1500);
+  setInterval(updateBackupStatus,60*1000);
   setInterval(checkAutoBackupSoir,5*60*1000); // revérifie toutes les 5 min tant que l'onglet reste ouvert
   // Vérifier connexion Supabase
   sbGet('__ping__').then(()=>{
