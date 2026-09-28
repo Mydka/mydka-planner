@@ -336,6 +336,11 @@ const _now=new Date();let G={drivers:[],veh:[],clients:[],regles:[],reglesBloc:[
 
 async function dbSave(){
   if(window.__SNAPSHOT_DATA__){console.warn('Sauvegarde archivée en lecture seule — modification non enregistrée');return;}
+  if(window.__DB_LOAD_ERROR__){
+    console.error('Sauvegarde bloquée : le chargement initial des données a échoué — rechargez la page avant de continuer pour éviter de perdre des données');
+    toast('&#9888; Sauvegarde bloquée — rechargez la page (problème de connexion au chargement)');
+    return;
+  }
   const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-6);
   const cutStr=cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0');
   const aff={};Object.keys(G.aff).forEach(k=>{if(k.slice(0,7)>=cutStr)aff[k]=G.aff[k];});
@@ -347,7 +352,7 @@ async function dbSave(){
     [SK+'_m',{drivers:G.drivers,veh:G.veh,clients:G.clients,regles:G.regles,reglesBloc:G.reglesBloc||[],reglesOrdre:G.reglesOrdre||[],nid:G.nid,hiddenDrivers:G.hiddenDrivers||[],tarifs:G.tarifs||{},tarifsSalarie:G.tarifsSalarie||{}}],
     [SK+'_c',{conges:G.conges||[],vehSwaps:G.vehSwaps||[],vehPeriod:G.vehPeriod||[],entretiens:G.entretiens||[]}],
     [SK+'_h',{vehHistory:vehHistLimited,ac:G.ac}],
-    [SK+'_s',{statuts:G.statuts,tours_prov:G.tours_prov,manualDays:G.manualDays||{},ajustSalaire:G.ajustSalaire||{},acomptes:G.acomptes||[],retenues:G.retenues||[]}],
+    [SK+'_s',{statuts:G.statuts,tours_prov:G.tours_prov,manualDays:G.manualDays||{},ajustSalaire:G.ajustSalaire||{},acomptes:G.acomptes||[],retenues:G.retenues||[],keyTours:G.keyTours||{}}],
     [SK+'_a',{aff,affExtra,affPrix,affHeure}]
   ];
   for(const [key,val] of saves){
@@ -446,15 +451,18 @@ async function dbLoad(){
     const rsLoc=window.storage?await window.storage.get(SK+'_s').catch(()=>null):null;
     const rs=rsSb?{value:rsSb}:rsLoc;
     const src=rs;
-    if(src&&src.value){const j=JSON.parse(src.value);G.statuts=j.statuts||{};G.tours_prov=j.tours_prov||{};G.manualDays=j.manualDays||{};G.ajustSalaire=j.ajustSalaire||{};G.acomptes=j.acomptes||[];G.retenues=j.retenues||[];}
-    else{G.statuts={};G.tours_prov={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];}
+    if(src&&src.value){const j=JSON.parse(src.value);G.statuts=j.statuts||{};G.tours_prov=j.tours_prov||{};G.manualDays=j.manualDays||{};G.ajustSalaire=j.ajustSalaire||{};G.acomptes=j.acomptes||[];G.retenues=j.retenues||[];G.keyTours=j.keyTours||{};}
+    else{G.statuts={};G.tours_prov={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];G.keyTours={};}
     // Charger affectations
     const raSb=await sbGet(SK+'_a');
     const raLoc=window.storage?await window.storage.get(SK+'_a').catch(()=>null):null;
     const ra=raSb?{value:raSb}:raLoc;
     if(ra&&ra.value){const a=JSON.parse(ra.value);G.aff=a.aff||{};G.affExtra=a.affExtra||{};G.affPrix=a.affPrix||{};G.affHeure=a.affHeure||{};}
     else{G.aff={};G.affExtra={};G.affPrix={};G.affHeure={};}
-  }catch(e){console.warn('dbLoad error',e);dbReset();}
+  }catch(e){
+    console.error('dbLoad error — chargement interrompu, sauvegarde bloquée par sécurité',e);
+    window.__DB_LOAD_ERROR__=true; // empêche dbSave() d'écraser les vraies données avec un état incomplet
+  }
 }
 function dbReset(){const c=x=>JSON.parse(JSON.stringify(x));G.drivers=c(DEF.drivers);G.veh=DEF.veh.map(v=>({id:v,actif:true}));G.clients=c(DEF.clients);G.regles=c(DEF.regles);G.conges=[];G.vehSwaps=[];G.vehHistory=[];G.vehPeriod=[];G.hiddenDrvs=[];G.hiddenDrivers=[];G.statuts={};G.tours_prov={};G.aff={};G.affExtra={};G.affPrix={};G.affHeure={};G.ac=[];G.nid=DEF.nid;G.entretiens=[];G.reglesOrdre=DEF.reglesOrdre?[...DEF.reglesOrdre]:[];G.tarifsSalarie={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];}
 
@@ -1275,6 +1283,24 @@ async function writeBackupToFolder(content,filename,gesture){
     return true;
   }catch(e){console.warn('writeBackupToFolder error',e);return false;}
 }
+// Sauvegarde datée : crée un sous-dossier avec la date du jour (ex: "2026-09-24") dans le dossier choisi,
+// et y écrit une copie — garde un historique récupérable, contrairement au fichier "dernière sauvegarde" qui est remplacé
+async function writeDatedBackupToFolder(content,gesture){
+  const handle=await _abGetHandle();
+  if(!handle)return false;
+  try{
+    let perm=await handle.queryPermission({mode:'readwrite'});
+    if(perm!=='granted'&&gesture){perm=await handle.requestPermission({mode:'readwrite'});}
+    if(perm!=='granted')return false;
+    const dateStr=new Date().toISOString().slice(0,10);
+    const dayFolder=await handle.getDirectoryHandle(dateStr,{create:true});
+    const fileHandle=await dayFolder.getFileHandle('TourPlanner_'+dateStr+'.html',{create:true});
+    const writable=await fileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    return true;
+  }catch(e){console.warn('writeDatedBackupToFolder error',e);return false;}
+}
 function checkAutoBackupSoir(){
   try{
     if(localStorage.getItem('tp_autobackup_enabled')==='0')return;
@@ -1284,6 +1310,8 @@ function checkAutoBackupSoir(){
     if(now.getHours()<heureCible)return;
     if(localStorage.getItem('tp_autobackup_last')===todayStr)return;
     exportMoisHTML(false);
+    // En plus du fichier toujours à jour, garder une copie datée dans son propre dossier (historique récupérable)
+    writeDatedBackupToFolder(buildStaticSnapshotHtml(),false);
     localStorage.setItem('tp_autobackup_last',todayStr);
   }catch(e){console.warn('checkAutoBackupSoir error',e);}
 }
@@ -1294,7 +1322,7 @@ async function openAutoBackupSettings(){
   const handle=await _abGetHandle();
   const supported=!!window.showDirectoryPicker;
   showModal('&#9881; Sauvegarde automatique du soir','',
-    '<div style="font-size:12px;color:#6B7280;margin-bottom:12px">Si vous choisissez un dossier ci-dessous, le fichier y sera <strong>mis à jour automatiquement à chaque modification</strong> (nouvelle tournée, tarif, etc.), en remplaçant toujours la même version — vous avez ainsi en permanence la dernière version à jour dans ce dossier. L\'heure ci-dessous ne sert que de filet de sécurité si aucun dossier n\'est choisi (téléchargement classique, une fois par soir). <strong>Tout ceci nécessite que l\'onglet reste ouvert dans le navigateur.</strong></div>'
+    '<div style="font-size:12px;color:#6B7280;margin-bottom:12px">Si vous choisissez un dossier ci-dessous : le fichier <strong>"TourPlanner_dernieresauvegarde.html"</strong> y est mis à jour à chaque modification (toujours la version la plus récente). En plus, chaque soir à l\'heure choisie, une <strong>copie datée est archivée dans un sous-dossier séparé</strong> (ex: "2026-09-24/") — un vrai historique que vous pouvez consulter si besoin de revenir en arrière. <strong>Nécessite que l\'onglet reste ouvert dans le navigateur.</strong></div>'
     +'<div class="fg"><label class="fl">Activer la sauvegarde automatique</label>'
       +'<select class="fs" id="ab-enabled"><option value="1"'+(enabled?' selected':'')+'>Activée</option><option value="0"'+(!enabled?' selected':'')+'>Désactivée</option></select></div>'
     +'<div class="fg"><label class="fl">Heure de déclenchement</label>'
@@ -1311,10 +1339,20 @@ async function openAutoBackupSettings(){
           :'<div style="font-size:11px;color:#9CA3AF;margin-bottom:6px">Aucun dossier choisi — les sauvegardes seront simplement téléchargées (dossier Téléchargements). Choisissez un dossier (ex: votre OneDrive local) pour qu\'elles s\'y enregistrent directement.</div>'
             +'<button class="btn btn-or btn-sm" onclick="chooseAutoBackupFolder()">&#128193; Choisir un dossier</button>')
     +'</div>'
+    +(handle?'<button class="btn btn-out btn-sm" onclick="testDatedBackupNow()" style="margin-bottom:6px">&#128193; Créer une sauvegarde datée maintenant (test)</button>':'')
     +(last?'<div style="font-size:11px;color:#9CA3AF;margin-top:8px">Dernière sauvegarde automatique : '+fmtDate(last)+'</div>':'<div style="font-size:11px;color:#9CA3AF;margin-top:8px">Aucune sauvegarde automatique effectuée pour l\'instant</div>'),
     '<button class="btn btn-out btn-sm" onclick="closeMo()">Fermer</button>'
     +'<button class="btn btn-or btn-sm" onclick="confAutoBackupSettings()">Enregistrer</button>'
   );
+}
+async function testDatedBackupNow(){
+  const html=buildStaticSnapshotHtml();
+  const ok=await writeDatedBackupToFolder(html,true); // gesture=true : ce clic a le droit de redemander la permission
+  if(ok){
+    toast('&#128193; Sauvegarde datée créée (dossier '+new Date().toISOString().slice(0,10)+') ✓');
+  } else {
+    toast('&#9888; Échec — vérifiez le dossier choisi');
+  }
 }
 function confAutoBackupSettings(){
   localStorage.setItem('tp_autobackup_enabled',document.getElementById('ab-enabled').value);
@@ -1575,7 +1613,7 @@ function openDayMo(ds){
       </div>`
     :'';
   document.getElementById('dmo-box').innerHTML=`<div class="dmo-header"><div class="dmo-hrow"><div class="dmo-date">${dayLabel}</div><button class="dmo-close" onclick="closeDayMo()">&#10005;</button></div><div class="dmo-pills" id="dmo-pills">${pillsHtml}</div></div>${isSunday?'<div style="background:#FEF9C3;padding:9px 14px;font-size:11px;color:#92400E;font-weight:600">&#9432; Dimanche — saisie manuelle. Entrez les tournées puis assignez les chauffeurs.</div>':''}<div class="dmo-section"><div class="dmo-stitle">Tournées par client</div>${clientRows}</div>${isSunday?'<div class="dmo-section"><div class="dmo-stitle" style="color:#16A34A">Affectations manuelles (optionnel)</div><div style="font-size:11px;color:#6B7280;margin-bottom:8px">Cliquer sur un chauffeur pour l\'assigner à un client</div><div class="dmo-dg">'+planDrivers().map(dr=>{const aff=getAff(ds,dr.id);const cl=aff?G.clients.find(x=>x.id===aff):null;const col=dc(dr.id);return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0"><div style="width:24px;height:24px;border-radius:50%;background:'+col+';color:#fff;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+ini(dr.nom)+'</div><span style="font-size:11px;font-weight:600;flex:1">'+dr.nom.split(" ")[0]+'</span><div style="position:relative" id="sun-aff-'+ds+'-'+dr.id+'"><button style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;border:1px solid '+( cl?cl.color:'#D1D5DB')+';background:'+( cl?cl.color+'18':'#fff')+';color:'+( cl?cl.color:'#9CA3AF')+';cursor:pointer" onclick="openAssignDD(\''+ds+'\','+dr.id+',document.getElementById(\'sun-aff-'+ds+'-'+dr.id+'\'))">'+( cl?cl.nom:'+ Assigner')+'</button></div></div>';
-}).join('')+ '</div></div>':''}<div class="dmo-section"><div class="dmo-stitle">Présence des chauffeurs${isSunday?'  <span style="font-size:9px;color:#D1D5DB">(optionnel le dimanche)</span>':''}</div><div class="dmo-dg">${driverRows}</div></div>${inactifsRows}${alertHtml}${sansVehHtml}${vehHSHtml}${(G.manualDays||{})[ds]?'<button class="dmo-save" style="background:#6B7280" onclick="unprotectDay(\''+ds+'\')" title="Retirer la protection manuelle — ce jour sera re-dispatché automatiquement">&#128275; Libérer protection</button>':''}<button class="dmo-save" style="background:#25D366" onclick="previewDayWa('${ds}')">&#128241; Planning WhatsApp</button><button class="dmo-save" onclick="saveDayMo('${ds}')">&#128190; Sauvegarder${isSunday?' (manuel)':''}</button>`;
+}).join('')+ '</div></div>':''}<div class="dmo-section"><div class="dmo-stitle">Présence des chauffeurs${isSunday?'  <span style="font-size:9px;color:#D1D5DB">(optionnel le dimanche)</span>':''}</div><div class="dmo-dg">${driverRows}</div></div>${inactifsRows}${alertHtml}${sansVehHtml}${vehHSHtml}${(G.manualDays||{})[ds]?'<button class="dmo-save" style="background:#6B7280" onclick="unprotectDay(\''+ds+'\')" title="Retirer la protection manuelle — ce jour sera re-dispatché automatiquement">&#128275; Libérer protection</button>':''}<button class="dmo-save" style="background:#F59E0B" onclick="openKeyTour('${ds}')">&#128273; Tournée des clés</button><button class="dmo-save" style="background:#25D366" onclick="previewDayWa('${ds}')">&#128241; Planning WhatsApp</button><button class="dmo-save" onclick="saveDayMo('${ds}')">&#128190; Sauvegarder${isSunday?' (manuel)':''}</button>`;
   document.getElementById('dmo-bg').classList.add('open');
 }
 function openStatDD(ds,id,btn){closeDD();const dd=document.createElement('div');dd.className='stat-dd';STATUTS.forEach(s=>{const op=document.createElement('div');op.className='stat-dd-opt';op.innerHTML=`<span style="width:8px;height:8px;border-radius:50%;background:${SC[s]};flex-shrink:0;display:inline-block"></span>${SL[s]}`;op.onclick=e=>{e.stopPropagation();setStatModal(ds,id,s);closeDD();};dd.appendChild(op);});btn.appendChild(dd);regDD(dd);}
@@ -1676,6 +1714,120 @@ function unprotectDay(ds){
   if(G.manualDays)delete G.manualDays[ds];
   dbSave();closeDayMo();rPlanning(document.getElementById('content'));
   toast('Protection retirée — ce jour sera re-dispatché automatiquement');
+}
+
+// ── Tournée de retour des clés (dépôt) ────────────────────────────────────
+function getKeyTourDrivers(ds){
+  const ids=[];
+  planDrivers().forEach(dr=>{
+    if(dr.statut==='inactif')return;
+    if(gStat(ds,dr.id)!=='present')return;
+    const cidAM=getAff(ds,dr.id,'AM'),cidPM=getAff(ds,dr.id,'PM');
+    const hasExtraFO=getAffExtra(ds,dr.id).some(e=>e.clientId==='FO');
+    if(cidAM==='FO'||cidPM==='FO'||hasExtraFO)ids.push(dr.id);
+  });
+  return ids;
+}
+// Nombre de fois où chaque chauffeur a déjà été désigné "collecteur" (toutes dates enregistrées, hors le jour ds lui-même)
+function getKeyTourCollectorCounts(excludeDs){
+  const counts={};
+  if(!G.keyTours)return counts;
+  Object.keys(G.keyTours).forEach(ds2=>{
+    if(ds2===excludeDs)return;
+    const kt=G.keyTours[ds2];
+    if(kt&&kt.collectorId)counts[kt.collectorId]=(counts[kt.collectorId]||0)+1;
+  });
+  return counts;
+}
+// Répartition équitable : celui qui a été le MOINS souvent collecteur récemment est désigné aujourd'hui
+function autoBalanceKeyTour(ds){
+  if(!G.keyTours)G.keyTours={};
+  const availableIds=getKeyTourDrivers(ds);
+  if(!availableIds.length)return;
+  const counts=getKeyTourCollectorCounts(ds);
+  const sorted=availableIds.slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
+  const fairCollector=sorted[0];
+  const rest=availableIds.filter(id=>id!==fairCollector);
+  G.keyTours[ds]={order:[...rest,fairCollector],collectorId:fairCollector};
+  dbSave();
+  renderKeyTourModal(ds);
+  toast('&#9878;&#65039; Répartition équitable appliquée ✓');
+}
+function openKeyTour(ds){
+  if(!G.keyTours)G.keyTours={};
+  const availableIds=getKeyTourDrivers(ds);
+  let kt=G.keyTours[ds];
+  if(!kt){
+    // Première ouverture pour ce jour : répartir équitablement d'entrée (au lieu de toujours prendre le dernier de la liste)
+    const counts=getKeyTourCollectorCounts(ds);
+    const sorted=availableIds.slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
+    const fairCollector=sorted.length?sorted[0]:null;
+    const rest=availableIds.filter(id=>id!==fairCollector);
+    kt={order:fairCollector?[...rest,fairCollector]:availableIds.slice(),collectorId:fairCollector};
+  } else {
+    kt.order=kt.order.filter(id=>availableIds.includes(id));
+    availableIds.forEach(id=>{if(!kt.order.includes(id))kt.order.push(id);});
+    if(!kt.collectorId||!availableIds.includes(kt.collectorId))kt.collectorId=kt.order.length?kt.order[kt.order.length-1]:null;
+  }
+  G.keyTours[ds]=kt;
+  window._keyTourDs=ds;
+  renderKeyTourModal(ds);
+}
+function renderKeyTourModal(ds){
+  const kt=G.keyTours[ds];
+  const dObj=new Date(ds+'T00:00:00');
+  const jourLabel=DFR[dObj.getDay()]+' '+pd(dObj.getDate())+'/'+pd(dObj.getMonth()+1);
+  const counts=getKeyTourCollectorCounts(ds);
+  const rows=kt.order.length?kt.order.map((id,i)=>{
+    const dr=G.drivers.find(d=>d.id===id);
+    const isCollector=kt.collectorId===id;
+    const cnt=counts[id]||0;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:'+(isCollector?'#F0FDF4':'#F9FAFB')+';border:1px solid '+(isCollector?'#BBF7D0':'#E5E7EB')+';border-radius:7px;margin-bottom:5px">'
+      +'<span style="width:20px;height:20px;border-radius:50%;background:#16A34A;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(i+1)+'</span>'
+      +'<span style="flex:1;font-size:12px;font-weight:600">'+(dr?dr.nom:'?')+'</span>'
+      +'<span style="font-size:9px;color:#9CA3AF" title="Nombre de fois collecteur récemment">&#128273;&times;'+cnt+'</span>'
+      +(isCollector?'<span style="font-size:9px;font-weight:700;color:#16A34A;background:#DCFCE7;padding:2px 7px;border-radius:4px">&#128273; Ramène tout au dépôt</span>':'')
+      +'<button onclick="moveKeyTour(\''+ds+'\','+i+',-1)" '+(i===0?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8593;</button>'
+      +'<button onclick="moveKeyTour(\''+ds+'\','+i+',1)" '+(i===kt.order.length-1?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8595;</button>'
+      +'<button onclick="setKeyTourCollector(\''+ds+'\','+id+')" title="Désigner comme collecteur (ramène tout au dépôt)" style="width:22px;height:22px;border:1px solid '+(isCollector?'#16A34A':'#D1D5DB')+';background:'+(isCollector?'#16A34A':'#fff')+';color:'+(isCollector?'#fff':'#9CA3AF')+';border-radius:5px;cursor:pointer;font-size:11px">&#128273;</button>'
+    +'</div>';
+  }).join(''):'<div style="font-size:12px;color:#9CA3AF;text-align:center;padding:14px">Aucun chauffeur Foodflow ce jour-là</div>';
+  showModal('&#128273; Tournée des clés — '+jourLabel,'',
+    '<div style="font-size:11px;color:#6B7280;margin-bottom:10px">Ordre de retour des clés au dépôt. Utilisez &#8593;&#8595; pour réordonner, et &#128273; pour désigner qui ramène toutes les clés au dépôt. Le nombre &#128273;&times; indique combien de fois chacun a déjà été collecteur.</div>'
+    +'<button onclick="autoBalanceKeyTour(\''+ds+'\')" style="width:100%;padding:6px;margin-bottom:10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:7px;color:#92400E;font-size:11px;font-weight:700;cursor:pointer">&#9878;&#65039; Répartir équitablement (celui qui a le moins collecté devient collecteur)</button>'
+    +'<div id="key-tour-rows">'+rows+'</div>',
+    '<button class="btn btn-out btn-sm" onclick="closeMo()">Fermer</button>'
+    +'<button class="btn btn-or btn-sm" onclick="previewKeyTourWa(\''+ds+'\')">&#128241; Envoyer sur WhatsApp</button>');
+}
+function moveKeyTour(ds,idx,dir){
+  const kt=G.keyTours[ds];
+  const j=idx+dir;
+  if(j<0||j>=kt.order.length)return;
+  const tmp=kt.order[idx];kt.order[idx]=kt.order[j];kt.order[j]=tmp;
+  dbSave();renderKeyTourModal(ds);
+}
+function setKeyTourCollector(ds,driverId){
+  G.keyTours[ds].collectorId=driverId;
+  dbSave();renderKeyTourModal(ds);
+}
+function buildKeyTourMessage(ds){
+  const kt=G.keyTours[ds];if(!kt||!kt.order.length)return'';
+  const dObj=new Date(ds+'T00:00:00');
+  const jourLabel=DFR[dObj.getDay()]+' '+pd(dObj.getDate())+'/'+pd(dObj.getMonth()+1);
+  const lines=['🔑 *Retour des clés Foodflow — '+jourLabel+'*',''];
+  kt.order.forEach((id,i)=>{
+    const dr=G.drivers.find(d=>d.id===id);
+    const isCollector=kt.collectorId===id;
+    lines.push((i+1)+'. '+(dr?dr.nom:'?')+(isCollector?' — 🔑 *ramène toutes les clés au dépôt*':' — remet sa clé au suivant'));
+  });
+  lines.push('','_Mydka Planning_');
+  return lines.join('\n');
+}
+function previewKeyTourWa(ds){
+  const msg=buildKeyTourMessage(ds);
+  if(!msg){toast('Rien à envoyer');return;}
+  const waUrl='https://wa.me/?text='+encodeURIComponent(msg);
+  window.open(waUrl,'_blank');
 }
 
 // ── Planning WhatsApp du jour ─────────────────────────────────────────────
@@ -2238,7 +2390,7 @@ function buildTableauRows(y,m,allPlan,semaines,semStart,nbSem){
       :hasDimAff?'background:#FAFFF7':'';
     rows+=`<tr class="${isDim?'dim':''}" style="${rowBg}">
       <td class="l" style="color:${isToday?'#16A34A':'#9CA3AF'};font-size:10px;font-weight:${isToday?'700':'400'}">${isToday?'●':''} ${DFR[dow]}</td>
-      <td class="l" style="color:${isToday?'#16A34A':'#374151'};font-weight:${isToday?'700':'600'}">${pd(d)}/${pd(m+1)}${isToday?' ◀':''}${!isDim?` <button onclick="previewDayWa('${ds}')" title="Envoyer le planning du jour sur WhatsApp" style="margin-left:3px;background:#25D366;border:none;color:#fff;border-radius:4px;width:17px;height:17px;font-size:10px;cursor:pointer;line-height:17px;padding:0;vertical-align:middle">&#128241;</button>`:''}</td>
+      <td class="l" style="color:${isToday?'#16A34A':'#374151'};font-weight:${isToday?'700':'600'}">${pd(d)}/${pd(m+1)}${isToday?' ◀':''}${!isDim?` <button onclick="previewDayWa('${ds}')" title="Envoyer le planning du jour sur WhatsApp" style="margin-left:3px;background:#25D366;border:none;color:#fff;border-radius:4px;width:17px;height:17px;font-size:10px;cursor:pointer;line-height:17px;padding:0;vertical-align:middle">&#128241;</button><button onclick="openKeyTour('${ds}')" title="Tournée des clés Foodflow" style="margin-left:2px;background:#F59E0B;border:none;color:#fff;border-radius:4px;width:17px;height:17px;font-size:10px;cursor:pointer;line-height:17px;padding:0;vertical-align:middle">&#128273;</button>`:''}</td>
       ${cells}
       <td><span class="cell-add" onclick="openAddDD('${ds}',this.closest('td'))" title="Ajouter">+</span></td>
       ${totalCell}
@@ -5602,6 +5754,18 @@ window.addEventListener('resize',()=>{
   if(vscroll){const top=vscroll.getBoundingClientRect().top;vscroll.style.maxHeight=Math.max(240,window.innerHeight-top-16)+'px';}
 });
 dbLoad().then(async ()=>{
+  if(window.__DB_LOAD_ERROR__){
+    // Chargement échoué : ne RIEN sauvegarder, ne pas lancer le bootstrap, juste prévenir et bloquer
+    document.getElementById('loading').style.display='none';
+    document.getElementById('app').style.display='flex';
+    const banner=document.createElement('div');
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#DC2626;color:#fff;text-align:center;padding:10px;font-size:13px;font-weight:700';
+    banner.innerHTML='&#9888; Problème de connexion au chargement — rechargez la page (F5) avant de continuer pour éviter de perdre des données. Aucune sauvegarde ne sera faite tant que la page n\'est pas rechargée avec succès.';
+    document.body.prepend(banner);
+    document.body.style.paddingTop='40px';
+    rPlanning(document.getElementById('content'));
+    return;
+  }
   if(window.__SNAPSHOT_DATA__){
     // Mode sauvegarde archivée : démarrage simplifié, aucune écriture réseau
     document.getElementById('loading').style.display='none';
@@ -5663,7 +5827,7 @@ dbLoad().then(async ()=>{
       });
     }
   });
-  if(repaired){console.log('Conflits d\'attribution camion corrigés ✓');await dbSave();}
+  if(repaired){console.log('Conflits d\'attribution camion corrigés (affichage uniquement, non sauvegardé automatiquement) ✓');}
 
   // Réparation : périodes d'attribution camion en doublon ou qui se chevauchent pour un même chauffeur
   // (garde la période dont la date de DÉBUT est la plus tardive quand deux périodes se recoupent — plus fiable que la date de saisie)
@@ -5684,7 +5848,7 @@ dbLoad().then(async ()=>{
       });
       kept.push(...keptForDriver);
     });
-    if(repairedPeriods){G.vehPeriod=kept;console.log('Périodes d\'attribution en doublon/chevauchement corrigées ✓');await dbSave();}
+    if(repairedPeriods){G.vehPeriod=kept;console.log('Périodes d\'attribution en doublon/chevauchement corrigées (affichage uniquement, non sauvegardé automatiquement) ✓');}
   }
 
   document.getElementById('loading').style.display='none';
