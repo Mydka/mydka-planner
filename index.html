@@ -258,7 +258,7 @@ button{cursor:pointer;font-family:inherit}
         <div id="sb-status" style="margin-top:6px;text-align:center;font-size:9px;color:#4B5563">&#9679; Connexion Supabase...</div>
         <div onclick="openAutoBackupSettings()" style="margin-top:6px;text-align:center;font-size:9px;color:#6B7280;cursor:pointer;text-decoration:underline">&#9881; Sauvegarde auto du soir</div>
         <div id="sb-backup" style="margin-top:4px;text-align:center;font-size:9px;color:#6B7280;cursor:pointer;line-height:1.3"></div>
-        <div style="margin-top:4px;text-align:center;font-size:8px;color:#374151">Version 2026-09-24-d</div>
+        <div style="margin-top:4px;text-align:center;font-size:8px;color:#374151">Version 2026-09-29-e</div>
     </div>
   </div>
   <div class="content" id="content"></div>
@@ -353,7 +353,7 @@ async function dbSave(){
     [SK+'_m',{drivers:G.drivers,veh:G.veh,clients:G.clients,regles:G.regles,reglesBloc:G.reglesBloc||[],reglesOrdre:G.reglesOrdre||[],nid:G.nid,hiddenDrivers:G.hiddenDrivers||[],tarifs:G.tarifs||{},tarifsSalarie:G.tarifsSalarie||{}}],
     [SK+'_c',{conges:G.conges||[],vehSwaps:G.vehSwaps||[],vehPeriod:G.vehPeriod||[],entretiens:G.entretiens||[]}],
     [SK+'_h',{vehHistory:vehHistLimited,ac:G.ac}],
-    [SK+'_s',{statuts:G.statuts,tours_prov:G.tours_prov,manualDays:G.manualDays||{},ajustSalaire:G.ajustSalaire||{},acomptes:G.acomptes||[],retenues:G.retenues||[],keyTours:G.keyTours||{}}],
+    [SK+'_s',{statuts:G.statuts,tours_prov:G.tours_prov,manualDays:G.manualDays||{},ajustSalaire:G.ajustSalaire||{},acomptes:G.acomptes||[],retenues:G.retenues||[],keyTours:G.keyTours||{},keyTourBaseOrder:G.keyTourBaseOrder||[]}],
     [SK+'_a',{aff,affExtra,affPrix,affHeure}]
   ];
   for(const [key,val] of saves){
@@ -502,8 +502,8 @@ async function dbLoad(){
     const rsLoc=window.storage?await window.storage.get(SK+'_s').catch(()=>null):null;
     const rs=rsSb?{value:rsSb}:rsLoc;
     const src=rs;
-    if(src&&src.value){const j=JSON.parse(src.value);G.statuts=j.statuts||{};G.tours_prov=j.tours_prov||{};G.manualDays=j.manualDays||{};G.ajustSalaire=j.ajustSalaire||{};G.acomptes=j.acomptes||[];G.retenues=j.retenues||[];G.keyTours=j.keyTours||{};}
-    else{G.statuts={};G.tours_prov={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];G.keyTours={};}
+    if(src&&src.value){const j=JSON.parse(src.value);G.statuts=j.statuts||{};G.tours_prov=j.tours_prov||{};G.manualDays=j.manualDays||{};G.ajustSalaire=j.ajustSalaire||{};G.acomptes=j.acomptes||[];G.retenues=j.retenues||[];G.keyTours=j.keyTours||{};G.keyTourBaseOrder=j.keyTourBaseOrder||[];}
+    else{G.statuts={};G.tours_prov={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];G.keyTours={};G.keyTourBaseOrder=[];}
     // Charger affectations
     const raSb=await sbGet(SK+'_a');
     const raLoc=window.storage?await window.storage.get(SK+'_a').catch(()=>null):null;
@@ -1217,7 +1217,7 @@ function buildSnapshotDataObject(){
     statuts:G.statuts, tours_prov:G.tours_prov, manualDays:G.manualDays||{},
     ajustSalaire:G.ajustSalaire||{}, acomptes:G.acomptes||[], retenues:G.retenues||[],
     aff:G.aff, affExtra:G.affExtra||{}, affPrix:G.affPrix||{}, affHeure:G.affHeure||{},
-    keyTours:G.keyTours||{},
+    keyTours:G.keyTours||{}, keyTourBaseOrder:G.keyTourBaseOrder||[],
     ac:G.ac||[]
   };
 }
@@ -1813,6 +1813,18 @@ function getFoodflowPool(ds){
   });
   return ids;
 }
+// Ordre de référence STABLE des chauffeurs Foodflow, partagé par tous les jours (ne change pas d'un jour à l'autre,
+// seuls les chauffeurs non disponibles ce jour-là sont grisés à leur place). Se complète tout seul au fil des jours ouverts.
+function getKeyTourBaseOrder(){
+  if(!G.keyTourBaseOrder)G.keyTourBaseOrder=[];
+  const valid=new Set(planDrivers().filter(d=>d.statut!=='inactif').map(d=>d.id));
+  G.keyTourBaseOrder=G.keyTourBaseOrder.filter(id=>valid.has(id));
+  return G.keyTourBaseOrder;
+}
+function ensureInBaseOrder(id){
+  const base=getKeyTourBaseOrder();
+  if(!base.includes(id))base.push(id);
+}
 // Nombre de fois où chaque chauffeur a été collecteur AVANT la date donnée (historique pour l'équité)
 function getKeyTourCollectorCounts(excludeDs){
   const counts={};
@@ -1824,43 +1836,42 @@ function getKeyTourCollectorCounts(excludeDs){
   });
   return counts;
 }
-// Construit / met à jour la tournée d'un jour : tous les chauffeurs Foodflow (planifiés ou non) + ajouts manuels - retraits manuels
-function computeKeyTour(ds,resetAll){
+// Construit / met à jour la tournée d'un jour à partir de l'ordre de BASE (stable), filtré à ce qui concerne ce jour-là
+function computeKeyTour(ds){
   if(!G.keyTours)G.keyTours={};
-  const old=resetAll?{}:(G.keyTours[ds]||{});
+  const old=G.keyTours[ds]||{};
   const removed=(old.removed||[]).slice();
   const extra=(old.extra||[]).slice();
-  const valid=new Set(planDrivers().map(d=>d.id));
   const sched=getKeyTourDrivers(ds);
-  const pool=[...new Set([...getFoodflowPool(ds),...extra,...sched])].filter(id=>valid.has(id)&&!removed.includes(id));
-  let order=(old.order||[]).filter(id=>pool.includes(id));
-  pool.forEach(id=>{if(!order.includes(id))order.push(id);});
+  const poolIds=[...new Set([...getFoodflowPool(ds),...extra,...sched])];
+  poolIds.forEach(id=>ensureInBaseOrder(id)); // tout nouveau venu rejoint l'ordre de base, pour tous les jours suivants
+  const base=getKeyTourBaseOrder();
+  const poolSet=new Set(poolIds);
+  const order=base.filter(id=>poolSet.has(id)&&!removed.includes(id));
   let collector=old.collectorId;
-  const needCollector=!collector||!pool.includes(collector);
-  if(needCollector||!old.order){
-    // Collecteur équitable : parmi ceux qui travaillent ce jour-là, celui qui l'a été le moins souvent
+  if(!collector||!order.includes(collector)){
     const counts=getKeyTourCollectorCounts(ds);
-    const cands=sched.filter(id=>pool.includes(id));
-    const base=(cands.length?cands:pool).slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
-    collector=base.length?base[0]:null;
-    const rest=pool.filter(id=>id!==collector);
-    order=[...rest.filter(id=>sched.includes(id)),...rest.filter(id=>!sched.includes(id)),...(collector?[collector]:[])];
+    const cands=order.filter(id=>sched.includes(id));
+    const ranked=(cands.length?cands:order).slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
+    collector=ranked.length?ranked[0]:null;
   }
   G.keyTours[ds]={order,collectorId:collector,removed,extra};
   return G.keyTours[ds];
 }
 function autoBalanceKeyTour(ds){
-  if(!G.keyTours)G.keyTours={};
-  const prev=G.keyTours[ds]||{};
-  // Recalcule le collecteur équitablement en gardant les ajouts/retraits manuels
-  G.keyTours[ds]={removed:prev.removed||[],extra:prev.extra||[]};
-  computeKeyTour(ds,false);
+  const kt=G.keyTours[ds];if(!kt)return;
+  // Recalcule uniquement le collecteur équitablement — l'ordre de la liste ne bouge pas
+  const sched=getKeyTourDrivers(ds);
+  const counts=getKeyTourCollectorCounts(ds);
+  const cands=kt.order.filter(id=>sched.includes(id));
+  const ranked=(cands.length?cands:kt.order).slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
+  kt.collectorId=ranked.length?ranked[0]:null;
   dbSave();
   renderKeyTourModal(ds);
   toast('&#9878;&#65039; Répartition équitable appliquée ✓');
 }
 function openKeyTour(ds){
-  computeKeyTour(ds,false);
+  computeKeyTour(ds);
   window._keyTourDs=ds;
   renderKeyTourModal(ds);
 }
@@ -1887,10 +1898,10 @@ function renderKeyTourModal(ds){
       +tag
       +'<span style="font-size:9px;color:#9CA3AF" title="Nombre de fois collecteur avant ce jour">&#128273;&times;'+cnt+'</span>'
       +(isCollector?'<span style="font-size:9px;font-weight:700;color:#16A34A;background:#DCFCE7;padding:2px 7px;border-radius:4px;white-space:nowrap">&#128273; Ramène tout au dépôt</span>':'')
-      +'<button onclick="moveKeyTour(\''+ds+'\','+i+',-1)" '+(i===0?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8593;</button>'
-      +'<button onclick="moveKeyTour(\''+ds+'\','+i+',1)" '+(i===kt.order.length-1?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8595;</button>'
+      +'<button onclick="moveKeyTour(\''+ds+'\','+i+',-1)" title="Déplacer (ordre valable tous les jours)" '+(i===0?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8593;</button>'
+      +'<button onclick="moveKeyTour(\''+ds+'\','+i+',1)" title="Déplacer (ordre valable tous les jours)" '+(i===kt.order.length-1?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8595;</button>'
       +'<button onclick="setKeyTourCollector(\''+ds+'\','+id+')" title="Désigner comme collecteur (ramène tout au dépôt)" style="width:22px;height:22px;border:1px solid '+(isCollector?'#16A34A':'#D1D5DB')+';background:'+(isCollector?'#16A34A':'#fff')+';color:'+(isCollector?'#fff':'#9CA3AF')+';border-radius:5px;cursor:pointer;font-size:11px">&#128273;</button>'
-      +'<button onclick="removeKeyTourDriver(\''+ds+'\','+id+')" title="Retirer de la tournée de ce jour" style="width:22px;height:22px;border:1px solid #FECACA;background:#FEF2F2;color:#DC2626;border-radius:5px;cursor:pointer;font-size:11px">&#10005;</button>'
+      +'<button onclick="removeKeyTourDriver(\''+ds+'\','+id+')" title="Retirer de la tournée de ce jour seulement" style="width:22px;height:22px;border:1px solid #FECACA;background:#FEF2F2;color:#DC2626;border-radius:5px;cursor:pointer;font-size:11px">&#10005;</button>'
     +'</div>';
   }).join(''):'<div style="font-size:12px;color:#9CA3AF;text-align:center;padding:14px">Aucun chauffeur Foodflow</div>';
   const addable=planDrivers().filter(d=>!kt.order.includes(d.id));
@@ -1899,7 +1910,7 @@ function renderKeyTourModal(ds){
       +'<button class="btn btn-out btn-sm" onclick="addKeyTourDriver(\''+ds+'\')">+ Ajouter</button></div>'
     :'';
   showModal('&#128273; Tournée des clés — '+jourLabel,'',
-    '<div style="font-size:11px;color:#6B7280;margin-bottom:10px">Tous les chauffeurs Foodflow, planifiés ou non ce jour-là (les non planifiés sont en gris). &#8593;&#8595; pour réordonner, &#128273; pour désigner qui ramène toutes les clés au dépôt, &#10005; pour retirer quelqu\'un de ce jour. &#128273;&times;N = nombre de fois collecteur avant ce jour.</div>'
+    '<div style="font-size:11px;color:#6B7280;margin-bottom:10px">Ordre commun à tous les jours (les non disponibles sont grisés à leur place). &#8593;&#8595; pour réordonner (valable pour tous les jours), &#128273; pour désigner qui ramène toutes les clés au dépôt, &#10005; pour retirer quelqu\'un de ce jour seulement. &#128273;&times;N = nombre de fois collecteur avant ce jour.</div>'
     +'<button onclick="autoBalanceKeyTour(\''+ds+'\')" style="width:100%;padding:6px;margin-bottom:10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:7px;color:#92400E;font-size:11px;font-weight:700;cursor:pointer">&#9878;&#65039; Répartir équitablement (parmi ceux qui travaillent ce jour, celui qui a le moins collecté)</button>'
     +'<div id="key-tour-rows" style="max-height:52vh;overflow-y:auto">'+rows+'</div>'
     +addSel,
@@ -1910,7 +1921,12 @@ function moveKeyTour(ds,idx,dir){
   const kt=G.keyTours[ds];
   const j=idx+dir;
   if(j<0||j>=kt.order.length)return;
-  const tmp=kt.order[idx];kt.order[idx]=kt.order[j];kt.order[j]=tmp;
+  const id=kt.order[idx],otherId=kt.order[j];
+  // On déplace dans l'ordre de BASE (valable pour tous les jours), pas seulement pour aujourd'hui
+  const base=getKeyTourBaseOrder();
+  const bi=base.indexOf(id),bj=base.indexOf(otherId);
+  if(bi>=0&&bj>=0){const tmp=base[bi];base[bi]=base[bj];base[bj]=tmp;}
+  computeKeyTour(ds);
   dbSave();renderKeyTourModal(ds);
 }
 function setKeyTourCollector(ds,driverId){
@@ -1919,10 +1935,9 @@ function setKeyTourCollector(ds,driverId){
 }
 function removeKeyTourDriver(ds,driverId){
   const kt=G.keyTours[ds];
-  kt.order=kt.order.filter(id=>id!==driverId);
   kt.extra=(kt.extra||[]).filter(id=>id!==driverId);
   if(!(kt.removed||[]).includes(driverId))kt.removed=[...(kt.removed||[]),driverId];
-  if(kt.collectorId===driverId)kt.collectorId=kt.order.length?kt.order[kt.order.length-1]:null;
+  computeKeyTour(ds);
   dbSave();renderKeyTourModal(ds);
 }
 function addKeyTourDriver(ds){
@@ -1931,7 +1946,8 @@ function addKeyTourDriver(ds){
   const kt=G.keyTours[ds];
   kt.removed=(kt.removed||[]).filter(x=>x!==id);
   if(!(kt.extra||[]).includes(id))kt.extra=[...(kt.extra||[]),id];
-  if(!kt.order.includes(id))kt.order.unshift(id);
+  ensureInBaseOrder(id);
+  computeKeyTour(ds);
   dbSave();renderKeyTourModal(ds);
 }
 function buildKeyTourMessage(ds){
@@ -1953,6 +1969,7 @@ function previewKeyTourWa(ds){
   const waUrl='https://wa.me/?text='+encodeURIComponent(msg);
   window.open(waUrl,'_blank');
 }
+
 
 // ── Planning WhatsApp du jour ─────────────────────────────────────────────
 function buildDayWaMessage(ds){
