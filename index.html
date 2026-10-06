@@ -258,7 +258,7 @@ button{cursor:pointer;font-family:inherit}
         <div id="sb-status" style="margin-top:6px;text-align:center;font-size:9px;color:#4B5563">&#9679; Connexion Supabase...</div>
         <div onclick="openAutoBackupSettings()" style="margin-top:6px;text-align:center;font-size:9px;color:#6B7280;cursor:pointer;text-decoration:underline">&#9881; Sauvegarde auto du soir</div>
         <div id="sb-backup" style="margin-top:4px;text-align:center;font-size:9px;color:#6B7280;cursor:pointer;line-height:1.3"></div>
-        <div style="margin-top:4px;text-align:center;font-size:8px;color:#374151">Version 2026-09-29-e</div>
+        <div style="margin-top:4px;text-align:center;font-size:8px;color:#374151">Version 2026-10-06-h</div>
     </div>
   </div>
   <div class="content" id="content"></div>
@@ -348,13 +348,14 @@ async function dbSave(){
   const affExtra={};Object.keys(G.affExtra||{}).forEach(k=>{if(k.slice(0,7)>=cutStr)affExtra[k]=G.affExtra[k];});
   const affPrix={};Object.keys(G.affPrix||{}).forEach(k=>{if(k.slice(0,7)>=cutStr)affPrix[k]=G.affPrix[k];});
   const affHeure={};Object.keys(G.affHeure||{}).forEach(k=>{if(k.slice(0,7)>=cutStr)affHeure[k]=G.affHeure[k];});
+  const affPrixSal={};Object.keys(G.affPrixSal||{}).forEach(k=>{if(k.slice(0,7)>=cutStr)affPrixSal[k]=G.affPrixSal[k];});
   const vehHistLimited=(G.vehHistory||[]).slice(-100);
   const saves=[
     [SK+'_m',{drivers:G.drivers,veh:G.veh,clients:G.clients,regles:G.regles,reglesBloc:G.reglesBloc||[],reglesOrdre:G.reglesOrdre||[],nid:G.nid,hiddenDrivers:G.hiddenDrivers||[],tarifs:G.tarifs||{},tarifsSalarie:G.tarifsSalarie||{}}],
     [SK+'_c',{conges:G.conges||[],vehSwaps:G.vehSwaps||[],vehPeriod:G.vehPeriod||[],entretiens:G.entretiens||[]}],
     [SK+'_h',{vehHistory:vehHistLimited,ac:G.ac}],
-    [SK+'_s',{statuts:G.statuts,tours_prov:G.tours_prov,manualDays:G.manualDays||{},ajustSalaire:G.ajustSalaire||{},acomptes:G.acomptes||[],retenues:G.retenues||[],keyTours:G.keyTours||{},keyTourBaseOrder:G.keyTourBaseOrder||[]}],
-    [SK+'_a',{aff,affExtra,affPrix,affHeure}]
+    [SK+'_s',{statuts:G.statuts,tours_prov:G.tours_prov,manualDays:G.manualDays||{},ajustSalaire:G.ajustSalaire||{},acomptes:G.acomptes||[],retenues:G.retenues||[],keyTours:G.keyTours||{},keyTourBaseOrder:G.keyTourBaseOrder||[],keyCounts:G.keyCounts||{},keyTourV2:!!G.keyTourV2}],
+    [SK+'_a',{aff,affExtra,affPrix,affHeure,affPrixSal}]
   ];
   for(const [key,val] of saves){
     const json=JSON.stringify(val);
@@ -502,20 +503,20 @@ async function dbLoad(){
     const rsLoc=window.storage?await window.storage.get(SK+'_s').catch(()=>null):null;
     const rs=rsSb?{value:rsSb}:rsLoc;
     const src=rs;
-    if(src&&src.value){const j=JSON.parse(src.value);G.statuts=j.statuts||{};G.tours_prov=j.tours_prov||{};G.manualDays=j.manualDays||{};G.ajustSalaire=j.ajustSalaire||{};G.acomptes=j.acomptes||[];G.retenues=j.retenues||[];G.keyTours=j.keyTours||{};G.keyTourBaseOrder=j.keyTourBaseOrder||[];}
-    else{G.statuts={};G.tours_prov={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];G.keyTours={};G.keyTourBaseOrder=[];}
+    if(src&&src.value){const j=JSON.parse(src.value);G.statuts=j.statuts||{};G.tours_prov=j.tours_prov||{};G.manualDays=j.manualDays||{};G.ajustSalaire=j.ajustSalaire||{};G.acomptes=j.acomptes||[];G.retenues=j.retenues||[];G.keyTours=j.keyTours||{};G.keyTourBaseOrder=j.keyTourBaseOrder||[];G.keyCounts=j.keyCounts||{};G.keyTourV2=!!j.keyTourV2;}
+    else{G.statuts={};G.tours_prov={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];G.keyTours={};G.keyTourBaseOrder=[];G.keyCounts={};G.keyTourV2=false;}
     // Charger affectations
     const raSb=await sbGet(SK+'_a');
     const raLoc=window.storage?await window.storage.get(SK+'_a').catch(()=>null):null;
     const ra=raSb?{value:raSb}:raLoc;
-    if(ra&&ra.value){const a=JSON.parse(ra.value);G.aff=a.aff||{};G.affExtra=a.affExtra||{};G.affPrix=a.affPrix||{};G.affHeure=a.affHeure||{};}
-    else{G.aff={};G.affExtra={};G.affPrix={};G.affHeure={};}
+    if(ra&&ra.value){const a=JSON.parse(ra.value);G.aff=a.aff||{};G.affExtra=a.affExtra||{};G.affPrix=a.affPrix||{};G.affHeure=a.affHeure||{};G.affPrixSal=a.affPrixSal||{};}
+    else{G.aff={};G.affExtra={};G.affPrix={};G.affHeure={};G.affPrixSal={};}
   }catch(e){
     console.error('dbLoad error — chargement interrompu, sauvegarde bloquée par sécurité',e);
     window.__DB_LOAD_ERROR__=true; // empêche dbSave() d'écraser les vraies données avec un état incomplet
   }
 }
-function dbReset(){const c=x=>JSON.parse(JSON.stringify(x));G.drivers=c(DEF.drivers);G.veh=DEF.veh.map(v=>({id:v,actif:true}));G.clients=c(DEF.clients);G.regles=c(DEF.regles);G.conges=[];G.vehSwaps=[];G.vehHistory=[];G.vehPeriod=[];G.hiddenDrvs=[];G.hiddenDrivers=[];G.statuts={};G.tours_prov={};G.aff={};G.affExtra={};G.affPrix={};G.affHeure={};G.ac=[];G.nid=DEF.nid;G.entretiens=[];G.reglesOrdre=DEF.reglesOrdre?[...DEF.reglesOrdre]:[];G.tarifsSalarie={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];}
+function dbReset(){const c=x=>JSON.parse(JSON.stringify(x));G.drivers=c(DEF.drivers);G.veh=DEF.veh.map(v=>({id:v,actif:true}));G.clients=c(DEF.clients);G.regles=c(DEF.regles);G.conges=[];G.vehSwaps=[];G.vehHistory=[];G.vehPeriod=[];G.hiddenDrvs=[];G.hiddenDrivers=[];G.statuts={};G.tours_prov={};G.aff={};G.affExtra={};G.affPrix={};G.affHeure={};G.affPrixSal={};G.ac=[];G.nid=DEF.nid;G.entretiens=[];G.reglesOrdre=DEF.reglesOrdre?[...DEF.reglesOrdre]:[];G.tarifsSalarie={};G.ajustSalaire={};G.acomptes=[];G.retenues=[];G.keyTours={};G.keyTourBaseOrder=[];G.keyCounts={};G.keyTourV2=false;}
 
 const dc=id=>PAL[(id-1)%PAL.length];
 const ini=n=>n.trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
@@ -540,7 +541,7 @@ function dsAddDays(ds,n){const p=ds.split('-').map(Number);const t=new Date(Date
 const getAffHeure=(ds,id,period)=>{if(!G.affHeure)return null;const k=ds+'_'+id+(period==='PM'?'_PM':'_AM');return G.affHeure[k]||null;};
 const setAffHeure=(ds,id,period,val)=>{if(!G.affHeure)G.affHeure={};const k=ds+'_'+id+(period==='PM'?'_PM':'_AM');if(val)G.affHeure[k]=val;else delete G.affHeure[k];};
 const setAff=(ds,id,cid,period)=>{if(period==='PM')G.aff[ds+'_'+id+'_PM']=cid;else G.aff[ds+'_'+id]=cid;};
-const delAff=(ds,id,period)=>{if(period==='PM')delete G.aff[ds+'_'+id+'_PM'];else delete G.aff[ds+'_'+id];};
+const delAff=(ds,id,period)=>{const k=ds+'_'+id+(period==='PM'?'_PM':'');delete G.aff[k];if(G.affPrixSal)delete G.affPrixSal[k];};
 const getAffExtra=(ds,id)=>G.affExtra&&G.affExtra[ds+'_'+id]||[];
 const addAffExtra=(ds,id,item)=>{if(!G.affExtra)G.affExtra={};const k=ds+'_'+id;if(!G.affExtra[k])G.affExtra[k]=[];G.affExtra[k].push(item);};
 const delAffExtra=(ds,id,idx)=>{if(!G.affExtra)return;const k=ds+'_'+id;if(G.affExtra[k])G.affExtra[k].splice(idx,1);};
@@ -627,9 +628,36 @@ function getCAMoisG(y,m){
   });
   return total;
 }
+// Rémunération d'une course : prix saisi à la main (affPrixSal, ou prixSal d'une course supplémentaire),
+// sinon tarif salarié du chauffeur
+function getSalRate(driverId){return parseFloat((G.tarifsSalarie||{})[driverId])||0;}
+function getSalTourMain(ds,driverId,period){
+  const e=(G.affPrixSal||{})[ds+'_'+driverId+(period==='PM'?'_PM':'')];
+  return (e&&e.prix!=null)?e.prix:getSalRate(driverId);
+}
+function hasSalCustomMain(ds,driverId,period){
+  const e=(G.affPrixSal||{})[ds+'_'+driverId+(period==='PM'?'_PM':'')];
+  return !!(e&&e.prix!=null&&e.prix!==getSalRate(driverId));
+}
+function getSalTourExtra(driverId,ex){return ex.prixSal!=null?ex.prixSal:getSalRate(driverId);}
+function hasSalCustomExtra(driverId,ex){return ex.prixSal!=null&&ex.prixSal!==getSalRate(driverId);}
+// Salaire gagné par un chauffeur un jour donné (toutes ses courses)
+function getSalaireJourG(driverId,ds){
+  let tot=0;
+  if(getAff(ds,driverId,'AM'))tot+=getSalTourMain(ds,driverId,'AM');
+  if(getAff(ds,driverId,'PM'))tot+=getSalTourMain(ds,driverId,'PM');
+  getAffExtra(ds,driverId).forEach(ex=>{tot+=getSalTourExtra(driverId,ex);});
+  return tot;
+}
 function getCoutSalarialMoisG(driverId,y,m){
-  const tarif=parseFloat((G.tarifsSalarie||{})[driverId])||0;
-  return getNbToursMoisG(driverId,y,m)*tarif;
+  const dim=new Date(y,m+1,0).getDate(),MM=String(m+1).padStart(2,'0'),today=localTodayStr();
+  let tot=0;
+  for(let d=1;d<=dim;d++){
+    const ds=y+'-'+MM+'-'+String(d).padStart(2,'0');
+    if(ds>today)break; // jours futurs : pas encore gagnés
+    tot+=getSalaireJourG(driverId,ds);
+  }
+  return tot;
 }
 function getAjustMoisTotalG(driverId,y,m){
   const dim=new Date(y,m+1,0).getDate();
@@ -1100,9 +1128,10 @@ function exportDataJSON(){
     hiddenDrivers:G.hiddenDrivers||[],
     statuts:G.statuts, tours_prov:G.tours_prov,
     manualDays:G.manualDays||{},
-    aff:G.aff, affExtra:G.affExtra||{}, affPrix:G.affPrix||{}, affHeure:G.affHeure||{},
+    aff:G.aff, affExtra:G.affExtra||{}, affPrix:G.affPrix||{}, affHeure:G.affHeure||{}, affPrixSal:G.affPrixSal||{},
     tarifsSalarie:G.tarifsSalarie||{}, ajustSalaire:G.ajustSalaire||{},
     acomptes:G.acomptes||[], retenues:G.retenues||[],
+    keyTours:G.keyTours||{}, keyTourBaseOrder:G.keyTourBaseOrder||[], keyCounts:G.keyCounts||{}, keyTourV2:!!G.keyTourV2,
     ac:G.ac||[], exportedAt:new Date().toISOString()
   };
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
@@ -1141,10 +1170,15 @@ async function importDataJSON(input){
       if(data.affExtra)G.affExtra=data.affExtra;
       if(data.affPrix)G.affPrix=data.affPrix;
       if(data.affHeure)G.affHeure=data.affHeure;
+      if(data.affPrixSal)G.affPrixSal=data.affPrixSal;
       if(data.tarifsSalarie)G.tarifsSalarie=data.tarifsSalarie;
       if(data.ajustSalaire)G.ajustSalaire=data.ajustSalaire;
       if(data.acomptes)G.acomptes=data.acomptes;
       if(data.retenues)G.retenues=data.retenues;
+      if(data.keyTours)G.keyTours=data.keyTours;
+      if(data.keyTourBaseOrder)G.keyTourBaseOrder=data.keyTourBaseOrder;
+      if(data.keyCounts)G.keyCounts=data.keyCounts;
+      if(data.keyTourV2!==undefined)G.keyTourV2=!!data.keyTourV2;
       if(data.ac)G.ac=data.ac;
       // Sauvegarder sur Supabase
       toast('&#9203; Import en cours — envoi vers Supabase...');
@@ -1216,8 +1250,8 @@ function buildSnapshotDataObject(){
     hiddenDrivers:G.hiddenDrivers||[],
     statuts:G.statuts, tours_prov:G.tours_prov, manualDays:G.manualDays||{},
     ajustSalaire:G.ajustSalaire||{}, acomptes:G.acomptes||[], retenues:G.retenues||[],
-    aff:G.aff, affExtra:G.affExtra||{}, affPrix:G.affPrix||{}, affHeure:G.affHeure||{},
-    keyTours:G.keyTours||{}, keyTourBaseOrder:G.keyTourBaseOrder||[],
+    aff:G.aff, affExtra:G.affExtra||{}, affPrix:G.affPrix||{}, affHeure:G.affHeure||{}, affPrixSal:G.affPrixSal||{},
+    keyTours:G.keyTours||{}, keyTourBaseOrder:G.keyTourBaseOrder||[], keyCounts:G.keyCounts||{}, keyTourV2:!!G.keyTourV2,
     ac:G.ac||[]
   };
 }
@@ -1800,16 +1834,16 @@ function getKeyTourDrivers(ds){
   });
   return ids;
 }
-// Tous les chauffeurs "de Foodflow" : ceux qui ont eu au moins une tournée Foodflow autour de cette date
-// (60 jours avant → 30 jours après), planifiés ou non le jour concerné
-function getFoodflowPool(ds){
+// Tous les chauffeurs "de Foodflow" : ceux qui ont déjà fait au moins une tournée Foodflow (n'importe quand).
+// Sert uniquement à les ajouter UNE FOIS à l'ordre de base : ils y restent ensuite tous les jours.
+function getFoodflowPool(){
   const ids=[];
   planDrivers().forEach(dr=>{
     if(dr.statut==='inactif')return;
-    for(let k=-60;k<=30;k++){
-      const d2=dsAddDays(ds,k);
-      if(getAff(d2,dr.id,'AM')==='FO'||getAff(d2,dr.id,'PM')==='FO'||getAffExtra(d2,dr.id).some(e=>e.clientId==='FO')){ids.push(dr.id);break;}
-    }
+    const suf='_'+dr.id,sufPM=suf+'_PM';
+    const inAff=Object.keys(G.aff||{}).some(k=>G.aff[k]==='FO'&&(k.endsWith(suf)||k.endsWith(sufPM)));
+    const inExtra=Object.keys(G.affExtra||{}).some(k=>k.endsWith(suf)&&(G.affExtra[k]||[]).some(e=>e.clientId==='FO'));
+    if(inAff||inExtra)ids.push(dr.id);
   });
   return ids;
 }
@@ -1825,50 +1859,100 @@ function ensureInBaseOrder(id){
   const base=getKeyTourBaseOrder();
   if(!base.includes(id))base.push(id);
 }
-// Nombre de fois où chaque chauffeur a été collecteur AVANT la date donnée (historique pour l'équité)
-function getKeyTourCollectorCounts(excludeDs){
-  const counts={};
-  if(!G.keyTours)return counts;
-  Object.keys(G.keyTours).forEach(ds2=>{
-    if(excludeDs&&ds2>=excludeDs)return;
-    const kt=G.keyTours[ds2];
-    if(kt&&kt.collectorId)counts[kt.collectorId]=(counts[kt.collectorId]||0)+1;
-  });
-  return counts;
+// Nombre de retours de clés de chaque chauffeur : saisi à la main, jamais modifié automatiquement
+function getKeyCount(id){return parseInt((G.keyCounts||{})[id])||0;}
+
+// ── Rotation automatique du chauffeur qui rapporte les clés au dépôt ──────────────────────────────
+// Principe : on suit l'ordre de la liste. Le lendemain, c'est le suivant dans la liste qui rapporte les clés ;
+// s'il ne travaille pas pour Foodflow ce jour-là (absent, congé, non planifié, retiré), on passe au suivant,
+// et ainsi de suite. À la fin de la liste on repart du début.
+// Les chauffeurs qui peuvent rapporter les clés un jour donné : planifiés Foodflow et non retirés ce jour-là
+function keyAvail(d){
+  const removed=(((G.keyTours||{})[d])||{}).removed||[];
+  return new Set(getKeyTourDrivers(d).filter(id=>!removed.includes(id)));
+}
+// Prochain chauffeur dans la liste après "c" parmi ceux disponibles (liste circulaire)
+function nextInKeyRotation(base,c,availSet){
+  const n=base.length;if(!n)return null;
+  const start=base.indexOf(c);               // -1 : on repart du début de la liste
+  for(let k=1;k<=n;k++){
+    const id=base[(start+k)%n];
+    if(availSet.has(id))return id;
+  }
+  return null;
+}
+// Reprise de l'existant (une seule fois) : le dernier collecteur déjà enregistré jusqu'à aujourd'hui sert de point de départ
+function keyAnchorMigrate(){
+  const kts=G.keyTours||{};
+  if(Object.values(kts).some(k=>k&&k.fixed!=null))return;
+  const today=localTodayStr();
+  const days=Object.keys(kts).filter(d=>d<=today&&kts[d]&&kts[d].collectorId!=null).sort();
+  if(days.length){const d=days[days.length-1];kts[d].fixed=kts[d].collectorId;}
+}
+// Chauffeur qui rapporte les clés le jour ds.
+//  - un choix fait à la main ("fixed") pour ce jour est toujours respecté ;
+//  - sinon on part du dernier jour "fixé" avant ds et on avance jour par jour dans l'ordre de la liste.
+// Le résultat ne dépend donc pas de l'ordre dans lequel on ouvre les jours.
+function keyRotationCollector(ds){
+  if(!G.keyTours)G.keyTours={};
+  const kts=G.keyTours;
+  const kt=kts[ds];
+  if(kt&&kt.fixed!=null)return kt.fixed;
+  const base=getKeyTourBaseOrder();
+  const fixedDays=Object.keys(kts).filter(d=>kts[d]&&kts[d].fixed!=null).sort();
+  const prev=fixedDays.filter(d=>d<ds);
+  if(!prev.length){
+    const av=keyAvail(ds);
+    if(fixedDays.length){
+      // jour antérieur à tout point de départ : on garde l'ancien choix s'il existe, sinon le premier disponible
+      if(kt&&kt.collectorId!=null)return kt.collectorId;
+      return base.find(id=>av.has(id))||null;
+    }
+    // aucun point de départ nulle part : ce jour devient le point de départ (premier disponible dans la liste)
+    const first=base.find(id=>av.has(id));
+    if(first!=null){if(!kts[ds])kts[ds]={};kts[ds].fixed=first;}
+    return first!=null?first:null;
+  }
+  let c=kts[prev[prev.length-1]].fixed;
+  let d=dsAddDays(prev[prev.length-1],1),guard=0;
+  while(d<=ds&&guard++<800){
+    const k=kts[d];
+    if(k&&k.fixed!=null){c=k.fixed;}
+    else{
+      const av=keyAvail(d);
+      if(av.size)c=nextInKeyRotation(base,c,av);
+      else if(d===ds)return null;            // personne ne travaille pour Foodflow ce jour-là
+    }
+    d=dsAddDays(d,1);
+  }
+  return c;
 }
 // Construit / met à jour la tournée d'un jour à partir de l'ordre de BASE (stable), filtré à ce qui concerne ce jour-là
 function computeKeyTour(ds){
   if(!G.keyTours)G.keyTours={};
+  if(!G.keyTourV2){keyAnchorMigrate();G.keyTourV2=true;}
   const old=G.keyTours[ds]||{};
   const removed=(old.removed||[]).slice();
   const extra=(old.extra||[]).slice();
   const sched=getKeyTourDrivers(ds);
-  const poolIds=[...new Set([...getFoodflowPool(ds),...extra,...sched])];
-  poolIds.forEach(id=>ensureInBaseOrder(id)); // tout nouveau venu rejoint l'ordre de base, pour tous les jours suivants
+  // Découverte : tout chauffeur Foodflow (historique), planifié ce jour ou ajouté à la main rejoint l'ordre de base UNE FOIS POUR TOUTES
+  [...new Set([...getFoodflowPool(),...extra,...sched])].forEach(id=>ensureInBaseOrder(id));
   const base=getKeyTourBaseOrder();
-  const poolSet=new Set(poolIds);
-  const order=base.filter(id=>poolSet.has(id)&&!removed.includes(id));
-  let collector=old.collectorId;
-  if(!collector||!order.includes(collector)){
-    const counts=getKeyTourCollectorCounts(ds);
-    const cands=order.filter(id=>sched.includes(id));
-    const ranked=(cands.length?cands:order).slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
-    collector=ranked.length?ranked[0]:null;
-  }
-  G.keyTours[ds]={order,collectorId:collector,removed,extra};
-  return G.keyTours[ds];
+  // Liste du jour = TOUT l'ordre de base (planifiés, absents, non planifiés), moins seulement les retraits explicites de CE jour
+  const order=base.filter(id=>!removed.includes(id));
+  const entry=G.keyTours[ds]={order,collectorId:null,removed,extra};
+  if(old.fixed!=null&&order.includes(old.fixed))entry.fixed=old.fixed;   // choix manuel conservé tant que le chauffeur est dans la liste
+  entry.collectorId=keyRotationCollector(ds);
+  return entry;
 }
-function autoBalanceKeyTour(ds){
+// Annule le choix manuel de ce jour : le chauffeur est de nouveau désigné automatiquement (suivant dans la liste)
+function resetKeyTourAuto(ds){
   const kt=G.keyTours[ds];if(!kt)return;
-  // Recalcule uniquement le collecteur équitablement — l'ordre de la liste ne bouge pas
-  const sched=getKeyTourDrivers(ds);
-  const counts=getKeyTourCollectorCounts(ds);
-  const cands=kt.order.filter(id=>sched.includes(id));
-  const ranked=(cands.length?cands:kt.order).slice().sort((a,b)=>(counts[a]||0)-(counts[b]||0));
-  kt.collectorId=ranked.length?ranked[0]:null;
+  delete kt.fixed;
+  computeKeyTour(ds);
   dbSave();
   renderKeyTourModal(ds);
-  toast('&#9878;&#65039; Répartition équitable appliquée ✓');
+  toast('&#8635; Désignation automatique rétablie ✓');
 }
 function openKeyTour(ds){
   computeKeyTour(ds);
@@ -1879,12 +1963,11 @@ function renderKeyTourModal(ds){
   const kt=G.keyTours[ds];
   const dObj=new Date(ds+'T00:00:00');
   const jourLabel=DFR[dObj.getDay()]+' '+pd(dObj.getDate())+'/'+pd(dObj.getMonth()+1);
-  const counts=getKeyTourCollectorCounts(ds);
   const sched=getKeyTourDrivers(ds);
   const rows=kt.order.length?kt.order.map((id,i)=>{
     const dr=G.drivers.find(d=>d.id===id);
     const isCollector=kt.collectorId===id;
-    const cnt=counts[id]||0;
+    const cnt=getKeyCount(id);
     const isSched=sched.includes(id);
     const stat=gStat(ds,id);
     let tag='';
@@ -1896,11 +1979,12 @@ function renderKeyTourModal(ds){
       +'<span style="width:20px;height:20px;border-radius:50%;background:'+(isSched?'#16A34A':'#9CA3AF')+';color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(i+1)+'</span>'
       +'<span style="flex:1;font-size:12px;font-weight:600;min-width:0">'+(dr?dr.nom:'?')+'</span>'
       +tag
-      +'<span style="font-size:9px;color:#9CA3AF" title="Nombre de fois collecteur avant ce jour">&#128273;&times;'+cnt+'</span>'
+      +'<span onclick="openKeyCounts('+id+')" title="Nombre de retours de clés (saisi à la main) — cliquer pour modifier" style="font-size:10px;color:#6B7280;cursor:pointer;border-bottom:1px dotted #9CA3AF;white-space:nowrap">&#128273;&times;'+cnt+'</span>'
       +(isCollector?'<span style="font-size:9px;font-weight:700;color:#16A34A;background:#DCFCE7;padding:2px 7px;border-radius:4px;white-space:nowrap">&#128273; Ramène tout au dépôt</span>':'')
+      +(kt.fixed===id?'<span title="Choisi à la main (les jours suivants continuent à partir de lui)" style="font-size:10px">&#128204;</span>':'')
       +'<button onclick="moveKeyTour(\''+ds+'\','+i+',-1)" title="Déplacer (ordre valable tous les jours)" '+(i===0?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8593;</button>'
       +'<button onclick="moveKeyTour(\''+ds+'\','+i+',1)" title="Déplacer (ordre valable tous les jours)" '+(i===kt.order.length-1?'disabled style="opacity:.3"':'')+' style="width:22px;height:22px;border:1px solid #D1D5DB;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">&#8595;</button>'
-      +'<button onclick="setKeyTourCollector(\''+ds+'\','+id+')" title="Désigner comme collecteur (ramène tout au dépôt)" style="width:22px;height:22px;border:1px solid '+(isCollector?'#16A34A':'#D1D5DB')+';background:'+(isCollector?'#16A34A':'#fff')+';color:'+(isCollector?'#fff':'#9CA3AF')+';border-radius:5px;cursor:pointer;font-size:11px">&#128273;</button>'
+      +'<button onclick="setKeyTourCollector(\''+ds+'\','+id+')" title="'+(kt.fixed===id?'Annuler ce choix manuel':'Désigner à la main comme chauffeur qui ramène les clés')+'" style="width:22px;height:22px;border:1px solid '+(isCollector?'#16A34A':'#D1D5DB')+';background:'+(isCollector?'#16A34A':'#fff')+';color:'+(isCollector?'#fff':'#9CA3AF')+';border-radius:5px;cursor:pointer;font-size:11px">&#128273;</button>'
       +'<button onclick="removeKeyTourDriver(\''+ds+'\','+id+')" title="Retirer de la tournée de ce jour seulement" style="width:22px;height:22px;border:1px solid #FECACA;background:#FEF2F2;color:#DC2626;border-radius:5px;cursor:pointer;font-size:11px">&#10005;</button>'
     +'</div>';
   }).join(''):'<div style="font-size:12px;color:#9CA3AF;text-align:center;padding:14px">Aucun chauffeur Foodflow</div>';
@@ -1909,13 +1993,45 @@ function renderKeyTourModal(ds){
     ?'<div style="display:flex;gap:6px;margin-top:8px"><select class="fs" id="kt-add-sel" style="flex:1">'+addable.map(d=>'<option value="'+d.id+'">'+d.nom+'</option>').join('')+'</select>'
       +'<button class="btn btn-out btn-sm" onclick="addKeyTourDriver(\''+ds+'\')">+ Ajouter</button></div>'
     :'';
+  const collName=kt.collectorId!=null?((G.drivers.find(d=>d.id===kt.collectorId)||{}).nom||'?'):null;
   showModal('&#128273; Tournée des clés — '+jourLabel,'',
-    '<div style="font-size:11px;color:#6B7280;margin-bottom:10px">Ordre commun à tous les jours (les non disponibles sont grisés à leur place). &#8593;&#8595; pour réordonner (valable pour tous les jours), &#128273; pour désigner qui ramène toutes les clés au dépôt, &#10005; pour retirer quelqu\'un de ce jour seulement. &#128273;&times;N = nombre de fois collecteur avant ce jour.</div>'
-    +'<button onclick="autoBalanceKeyTour(\''+ds+'\')" style="width:100%;padding:6px;margin-bottom:10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:7px;color:#92400E;font-size:11px;font-weight:700;cursor:pointer">&#9878;&#65039; Répartir équitablement (parmi ceux qui travaillent ce jour, celui qui a le moins collecté)</button>'
+    '<div style="font-size:11px;color:#6B7280;margin-bottom:8px">Ordre commun à tous les jours (les non disponibles sont grisés à leur place). Le chauffeur qui ramène les clés au dépôt est <b>désigné automatiquement</b> : chaque jour, c\'est le suivant dans la liste qui travaille pour Foodflow. &#8593;&#8595; pour réordonner (valable pour tous les jours), &#128273; pour désigner quelqu\'un à la main, &#10005; pour retirer quelqu\'un de ce jour seulement.</div>'
+    +'<div style="display:flex;gap:6px;margin-bottom:10px">'
+      +'<button onclick="resetKeyTourAuto(\''+ds+'\')" title="Annule le choix manuel de ce jour" style="flex:1;padding:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:7px;color:#92400E;font-size:11px;font-weight:700;cursor:pointer">&#8635; Désignation automatique'+(collName?' — ce jour : '+collName:'')+'</button>'
+      +'<button onclick="openKeyCounts()" title="Saisir le nombre de retours de chacun" style="padding:6px 10px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:7px;color:#374151;font-size:11px;font-weight:700;cursor:pointer">&#9998; Nombre de retours</button>'
+    +'</div>'
     +'<div id="key-tour-rows" style="max-height:52vh;overflow-y:auto">'+rows+'</div>'
     +addSel,
     '<button class="btn btn-out btn-sm" onclick="closeMo()">Fermer</button>'
     +'<button class="btn btn-or btn-sm" onclick="previewKeyTourWa(\''+ds+'\')">&#128241; Envoyer sur WhatsApp</button>');
+}
+// Saisie manuelle du nombre de retours de chaque chauffeur
+function openKeyCounts(focusId){
+  const base=getKeyTourBaseOrder();
+  const rows=base.map(id=>{
+    const dr=G.drivers.find(d=>d.id===id);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #F3F4F6">'
+      +'<span style="flex:1;font-size:12px;font-weight:600">'+(dr?dr.nom:'?')+'</span>'
+      +'<input class="fi" type="number" min="0" step="1" id="kc-'+id+'" value="'+getKeyCount(id)+'" style="width:80px;text-align:center">'
+    +'</div>';
+  }).join('');
+  showModal('&#128273; Nombre de retours de clés','',
+    '<div style="font-size:11px;color:#6B7280;margin-bottom:8px">Indiquez combien de fois chaque chauffeur a déjà rapporté les clés au dépôt. Ces nombres sont à saisir à la main : l\'application ne les modifie jamais toute seule.</div>'
+    +'<div style="max-height:50vh;overflow-y:auto">'+(rows||'<div style="font-size:12px;color:#9CA3AF;padding:10px">Aucun chauffeur</div>')+'</div>',
+    '<button class="btn btn-out btn-sm" onclick="renderKeyTourModal(window._keyTourDs)">Annuler</button>'
+    +'<button class="btn btn-or btn-sm" onclick="svKeyCounts()">Enregistrer</button>');
+  setTimeout(()=>{const i=document.getElementById('kc-'+focusId);if(i){i.focus();i.select();}},30);
+}
+function svKeyCounts(){
+  if(!G.keyCounts)G.keyCounts={};
+  getKeyTourBaseOrder().forEach(id=>{
+    const el=document.getElementById('kc-'+id);if(!el)return;
+    const v=parseInt(el.value);
+    if(isNaN(v)||v<=0)delete G.keyCounts[id];else G.keyCounts[id]=v;
+  });
+  dbSave();
+  toast('Nombres de retours enregistrés ✓');
+  renderKeyTourModal(window._keyTourDs);
 }
 function moveKeyTour(ds,idx,dir){
   const kt=G.keyTours[ds];
@@ -1930,7 +2046,10 @@ function moveKeyTour(ds,idx,dir){
   dbSave();renderKeyTourModal(ds);
 }
 function setKeyTourCollector(ds,driverId){
-  G.keyTours[ds].collectorId=driverId;
+  const kt=G.keyTours[ds];
+  if(kt.fixed===driverId){delete kt.fixed;}        // un second clic annule le choix manuel
+  else{kt.fixed=driverId;}
+  computeKeyTour(ds);
   dbSave();renderKeyTourModal(ds);
 }
 function removeKeyTourDriver(ds,driverId){
@@ -1952,10 +2071,14 @@ function addKeyTourDriver(ds){
 }
 function buildKeyTourMessage(ds){
   const kt=G.keyTours[ds];if(!kt||!kt.order.length)return'';
+  // Seuls ceux qui travaillent pour Foodflow ce jour-là ont des clés à rendre (+ le chauffeur désigné)
+  const sched=getKeyTourDrivers(ds);
+  const list=kt.order.filter(id=>sched.includes(id)||id===kt.collectorId);
+  if(!list.length)return'';
   const dObj=new Date(ds+'T00:00:00');
   const jourLabel=DFR[dObj.getDay()]+' '+pd(dObj.getDate())+'/'+pd(dObj.getMonth()+1);
   const lines=['🔑 *Retour des clés Foodflow — '+jourLabel+'*',''];
-  kt.order.forEach((id,i)=>{
+  list.forEach((id,i)=>{
     const dr=G.drivers.find(d=>d.id===id);
     const isCollector=kt.collectorId===id;
     lines.push((i+1)+'. '+(dr?dr.nom:'?')+(isCollector?' — 🔑 *ramène toutes les clés au dépôt*':' — remet sa clé au suivant'));
@@ -2128,6 +2251,9 @@ function askPrixExtra(ds,driverId,clientId,label,defPrix){
     +'<div class="fg"><label class="fl">Prix de cette tournée (€)</label>'
       +'<input class="fi" type="number" min="0" step="0.5" id="epx-prix" value="'+defPrix+'" placeholder="Ex: 54.00" style="font-size:15px;font-weight:700">'
     +'</div>'
+    +'<div class="fg"><label class="fl">&#128100; Salaire du chauffeur pour cette course (€) — laisser vide pour son tarif habituel'+(getSalRate(driverId)>0?' ('+getSalRate(driverId).toFixed(2)+' €)':'')+'</label>'
+      +'<input class="fi" type="number" min="0" step="0.5" id="epx-sal" placeholder="'+(getSalRate(driverId)>0?getSalRate(driverId).toFixed(2):'Ex: 100')+'">'
+    +'</div>'
     +'<div class="fg"><label class="fl">Note (optionnel)</label>'
       +'<input class="fi" id="epx-note" placeholder="Détail de la course...">'
     +'</div>',
@@ -2141,7 +2267,10 @@ function askPrixExtra(ds,driverId,clientId,label,defPrix){
 function confAskPrix(){const ds=window._epxDs,driverId=window._epxDrv,clientId=window._epxCl,label=window._epxLbl;
   const prix=parseFloat(document.getElementById('epx-prix').value)||0;
   const note=document.getElementById('epx-note').value.trim();
-  addAffExtra(ds,driverId,{clientId,label,prix,note,ts:nowTs()});
+  const _sr2=document.getElementById('epx-sal').value.trim().replace(',','.');
+  const _exI={clientId,label,prix,note,ts:nowTs()};
+  if(_sr2!==''&&!isNaN(parseFloat(_sr2))&&parseFloat(_sr2)!==getSalRate(driverId))_exI.prixSal=parseFloat(_sr2);
+  addAffExtra(ds,driverId,_exI);
   closeMo();dbSave();
   const cur=document.querySelector('.ni.active');
   if(cur&&cur.id==='ni-tarifs')rTarifs(document.getElementById('content'));
@@ -2177,6 +2306,11 @@ function openExtraDD(ds,driverId,idx,tdEl){
       +'<button class="btn btn-or btn-sm" onclick="setExtraHeure(\''+ds+'\','+driverId+','+idx+',document.getElementById(\'th-heure\').value);closeMo();dbSave();rTableau(document.getElementById(\'content\'))">Enregistrer</button>');
   };
   dd.appendChild(heureOpt);
+  const prixOptX=document.createElement('div');prixOptX.className='cl-dd-opt';
+  prixOptX.style.cssText='color:#7C3AED;font-weight:700';
+  prixOptX.innerHTML='&#128181; Prix de la course (client / salaire)';
+  prixOptX.onclick=ev=>{ev.stopPropagation();closeDD();openPrixTour(ds,driverId,'X',idx);};
+  dd.appendChild(prixOptX);
   const sep2=document.createElement('div');sep2.className='cl-dd-sep';dd.appendChild(sep2);
   const dl=document.createElement('div');dl.className='cl-dd-del';
   dl.innerHTML='&#10005; Supprimer cette tournée';
@@ -2214,6 +2348,96 @@ function openAssignDD(ds,did,tdEl,period){
   tdEl.style.position='relative';tdEl.appendChild(dd);regDD(dd);
 }
 
+// ── Prix d'une course (modifiable à tout moment, depuis le Tableau ou la page Tarifs) ─────────
+// Deux montants indépendants : le prix FACTURÉ au client et le SALAIRE versé au chauffeur pour cette course.
+// kind : 'AM' | 'PM' (tournée principale) ou 'X' (course supplémentaire, idx = position dans les extras du jour)
+function _prixTourCtx(ds,driverId,kind,idx){
+  const salRate=getSalRate(driverId);
+  if(kind==='X'){
+    const ex=getAffExtra(ds,driverId)[idx];if(!ex)return null;
+    const cl=G.clients.find(x=>x.id===ex.clientId)||{id:'CUSTOM',nom:ex.label||'Autre client',color:'#6B7280'};
+    const t=parseFloat(G.tarifs[ex.clientId])||0;
+    const defPrix=t>0?t*1.2:0;
+    return {cl,defPrix,isExtra:true,explicit:ex.prix!=null,cur:ex.prix!=null?ex.prix:defPrix,note:ex.note||'',
+            salRate,salExplicit:ex.prixSal!=null&&ex.prixSal!==salRate,salCur:ex.prixSal!=null?ex.prixSal:salRate};
+  }
+  const cid=getAff(ds,driverId,kind);if(!cid)return null;
+  const cl=G.clients.find(x=>x.id===cid);if(!cl)return null;
+  const defPrix=parseFloat(G.tarifs[cid])||0;
+  const e=(G.affPrix||{})[ds+'_'+driverId+(kind==='PM'?'_PM':'')];
+  const ok=!!(e&&e.clientId===cid&&e.prix!=null);
+  return {cl,defPrix,isExtra:false,explicit:ok&&e.prix!==defPrix,cur:ok?e.prix:defPrix,note:(e&&e.clientId===cid&&e.note)?e.note:'',
+          salRate,salExplicit:hasSalCustomMain(ds,driverId,kind),salCur:getSalTourMain(ds,driverId,kind)};
+}
+function openPrixTour(ds,driverId,kind,idx,focus){
+  const c=_prixTourCtx(ds,driverId,kind,idx);if(!c)return;
+  const dr=G.drivers.find(d=>d.id===driverId);
+  const q=v=>String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const idxArg=(kind==='X')?idx:'null';
+  const args="'"+ds+"',"+driverId+",'"+kind+"',"+idxArg;
+  showModal('&#128181; Prix de la course',(dr?dr.nom:'')+' — '+fmtDate(ds)+(kind==='PM'?' (après-midi)':kind==='AM'?' (matin)':' (course supplémentaire)'),
+    '<div style="background:'+c.cl.color+'18;border-radius:8px;padding:9px 14px;margin-bottom:8px;display:flex;align-items:center;gap:8px">'
+      +'<div style="width:10px;height:10px;border-radius:50%;background:'+c.cl.color+'"></div>'
+      +'<span style="font-weight:700;font-size:13px">'+c.cl.nom+'</span>'
+      +'<span style="font-size:11px;color:#6B7280;margin-left:auto">'+(c.defPrix>0?(c.isExtra?'Tarif par défaut (+20 %) : ':'Tarif standard : ')+c.defPrix.toFixed(2)+' €':'Aucun tarif défini pour ce client')+'</span>'
+    +'</div>'
+    +'<div class="fg"><label class="fl">&#128181; Prix facturé au client (€)</label>'
+      +'<input class="fi" type="number" min="0" step="0.5" id="pt-prix" value="'+((c.explicit||c.cur>0)?c.cur:'')+'" placeholder="'+(c.defPrix>0?c.defPrix.toFixed(2):'Ex: 180')+'">'
+    +'</div>'
+    +'<div style="background:#F0FDF4;border-radius:8px;padding:9px 14px;margin:10px 0 8px;display:flex;align-items:center;gap:8px">'
+      +'<span style="font-size:13px">&#128100;</span><span style="font-weight:700;font-size:13px">'+(dr?dr.nom:'Chauffeur')+'</span>'
+      +'<span style="font-size:11px;color:#6B7280;margin-left:auto">'+(c.salRate>0?'Tarif salarié : '+c.salRate.toFixed(2)+' €':'Aucun tarif salarié défini')+'</span>'
+    +'</div>'
+    +'<div class="fg"><label class="fl">&#128100; Salaire du chauffeur pour cette course (€)</label>'
+      +'<input class="fi" type="number" min="0" step="0.5" id="pt-sal" value="'+((c.salExplicit||c.salCur>0)?c.salCur:'')+'" placeholder="'+(c.salRate>0?c.salRate.toFixed(2):'Ex: 100')+'">'
+    +'</div>'
+    +'<div class="fg"><label class="fl">Note (optionnel)</label><input class="fi" id="pt-note" value="'+q(c.note)+'" placeholder="Détail de la course..."></div>'
+    +'<div style="font-size:10px;color:#9CA3AF">Champ vide = tarif standard.</div>',
+    '<button class="btn btn-out btn-sm" onclick="closeMo()">Annuler</button>'
+    +'<button class="btn btn-out btn-sm" onclick="resetPrixTour('+args+')" title="Revenir aux tarifs standard (client et salarié)">Tarifs standard</button>'
+    +'<button class="btn btn-or btn-sm" onclick="svPrixTour('+args+')">Enregistrer</button>');
+  setTimeout(()=>{const i=document.getElementById(focus==='sal'?'pt-sal':'pt-prix');if(i){i.focus();i.select();}},30);
+}
+function _afterPrixChange(){
+  window._keepTarifScroll=true;
+  closeMo();dbSave();refreshCurrentPage();
+}
+function svPrixTour(ds,driverId,kind,idx){
+  const c=_prixTourCtx(ds,driverId,kind,idx);if(!c)return;
+  const rawC=document.getElementById('pt-prix').value.trim().replace(',','.');
+  const rawS=document.getElementById('pt-sal').value.trim().replace(',','.');
+  const note=document.getElementById('pt-note').value.trim();
+  const prix=rawC===''?null:parseFloat(rawC);
+  const sal=rawS===''?null:parseFloat(rawS);
+  if((prix!==null&&(isNaN(prix)||prix<0))||(sal!==null&&(isNaN(sal)||sal<0))){toast('Prix invalide');return;}
+  if(!G.affPrix)G.affPrix={};
+  if(!G.affPrixSal)G.affPrixSal={};
+  const key=ds+'_'+driverId+(kind==='PM'?'_PM':'');
+  if(kind==='X'){
+    const ex=getAffExtra(ds,driverId)[idx];
+    if(prix===null)delete ex.prix;else ex.prix=prix;
+    if(sal===null||sal===c.salRate)delete ex.prixSal;else ex.prixSal=sal;
+    ex.note=note;
+  } else {
+    if(prix===null||(prix===c.defPrix&&!note))delete G.affPrix[key];
+    else G.affPrix[key]={prix:prix,note:note,clientId:c.cl.id};
+    if(sal===null||sal===c.salRate)delete G.affPrixSal[key];
+    else G.affPrixSal[key]={prix:sal};
+  }
+  toast('Prix enregistrés ✓');
+  _afterPrixChange();
+}
+function resetPrixTour(ds,driverId,kind,idx){
+  if(kind==='X'){
+    const ex=getAffExtra(ds,driverId)[idx];if(ex){delete ex.prix;delete ex.prixSal;}
+  } else {
+    const key=ds+'_'+driverId+(kind==='PM'?'_PM':'');
+    if(G.affPrix)delete G.affPrix[key];
+    if(G.affPrixSal)delete G.affPrixSal[key];
+  }
+  toast('Tarifs standard rétablis ✓');
+  _afterPrixChange();
+}
 function askPrixExtraMain(ds,driverId,cl,defPrix,period){
   showModal('&#128181; Prix tournée — '+cl.nom+(period==='PM'?' (après-midi)':' (matin)'),'',
     '<div style="background:'+cl.color+'18;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px">'
@@ -2224,6 +2448,9 @@ function askPrixExtraMain(ds,driverId,cl,defPrix,period){
     +'<div class="fg"><label class="fl">Prix de cette tournée (€) — laisser vide pour tarif standard</label>'
       +'<input class="fi" type="number" min="0" step="0.5" id="epx-prix" value="'+defPrix+'" placeholder="'+( defPrix||'Tarif standard')+'">'
     +'</div>'
+    +'<div class="fg"><label class="fl">&#128100; Salaire du chauffeur pour cette course (€) — laisser vide pour son tarif habituel'+(getSalRate(driverId)>0?' ('+getSalRate(driverId).toFixed(2)+' €)':'')+'</label>'
+      +'<input class="fi" type="number" min="0" step="0.5" id="epx-sal" placeholder="'+(getSalRate(driverId)>0?getSalRate(driverId).toFixed(2):'Ex: 100')+'">'
+    +'</div>'
     +'<div class="fg"><label class="fl">Note (optionnel)</label>'
       +'<input class="fi" id="epx-note" placeholder="Détail de la course...">'
     +'</div>',
@@ -2233,28 +2460,33 @@ function askPrixExtraMain(ds,driverId,cl,defPrix,period){
   setTimeout(()=>{
     const b=document.getElementById('epx-btn');
     if(b)b.onclick=()=>{
-      const prix=document.getElementById('epx-prix').value;
+      const prixRaw=document.getElementById('epx-prix').value.trim().replace(',','.');
       const note=document.getElementById('epx-note').value.trim();
+      const salRaw=document.getElementById('epx-sal').value.trim().replace(',','.');
       // Affecter la tournée principale
       setAff(ds,driverId,cl.id,period);
       const affPrixKey=ds+'_'+driverId+(period==='PM'?'_PM':'');
-      // Si prix personnalisé (différent du tarif standard), stocker dans affExtra comme indicateur
-      const prixVal=parseFloat(prix)||null;
+      const prixVal=prixRaw===''?null:parseFloat(prixRaw);
       const tarifStd=parseFloat((G.tarifs||{})[cl.id])||0;
-      if(prixVal!==null&&prixVal!==tarifStd){
-        // Stocker le prix custom dans une clé dédiée
-        if(!G.affPrix)G.affPrix={};
-        G.affPrix[affPrixKey]={prix:prixVal,note:note,clientId:cl.id};
+      if(!G.affPrix)G.affPrix={};
+      if(prixVal!==null&&!isNaN(prixVal)&&prixVal>=0&&prixVal!==tarifStd){
+        G.affPrix[affPrixKey]={prix:prixVal,note:note,clientId:cl.id};   // prix saisi à la main
       } else if(note){
-        if(!G.affPrix)G.affPrix={};
         G.affPrix[affPrixKey]={prix:tarifStd,note:note,clientId:cl.id};
+      } else {
+        delete G.affPrix[affPrixKey];                                      // tarif standard : on nettoie un ancien prix éventuel
       }
+      // Salaire du chauffeur pour cette course (vide ou égal au tarif habituel = rien à mémoriser)
+      if(!G.affPrixSal)G.affPrixSal={};
+      const salVal=salRaw===''?null:parseFloat(salRaw);
+      if(salVal!==null&&!isNaN(salVal)&&salVal>=0&&salVal!==getSalRate(driverId))G.affPrixSal[affPrixKey]={prix:salVal};
+      else delete G.affPrixSal[affPrixKey];
       closeMo();dbSave();rTableau(document.getElementById('content'));
     };
     const i=document.getElementById('epx-prix');if(i){i.focus();i.select();}
   },30);
 }
-function openClDD(ds,did,anchor,period){closeDD();const cc=getAff(ds,did,period);const dd=document.createElement('div');dd.className='cl-dd';G.clients.forEach(cl=>{const iC=cl.id===cc,op=document.createElement('div');op.className='cl-dd-opt';op.style.cssText=`background:${iC?cl.color+'18':'#fff'};color:${iC?cl.color:'#374151'}`;op.innerHTML=`<span style="width:7px;height:7px;border-radius:50%;background:${cl.color};flex-shrink:0;display:inline-block"></span>${cl.nom}${iC?' ✓':''}`;op.onclick=e=>{e.stopPropagation();setAff(ds,did,cl.id,period);closeDD();dbSave();rTableau(document.getElementById('content'));};dd.appendChild(op);});const sp=document.createElement('div');sp.className='cl-dd-sep';dd.appendChild(sp);
+function openClDD(ds,did,anchor,period){closeDD();const cc=getAff(ds,did,period);const dd=document.createElement('div');dd.className='cl-dd';G.clients.forEach(cl=>{const iC=cl.id===cc,op=document.createElement('div');op.className='cl-dd-opt';op.style.cssText=`background:${iC?cl.color+'18':'#fff'};color:${iC?cl.color:'#374151'}`;op.innerHTML=`<span style="width:7px;height:7px;border-radius:50%;background:${cl.color};flex-shrink:0;display:inline-block"></span>${cl.nom}${iC?' ✓':''}`;op.onclick=e=>{e.stopPropagation();if(cl.id!==cc&&G.affPrix)delete G.affPrix[ds+'_'+did+(period==='PM'?'_PM':'')];setAff(ds,did,cl.id,period);closeDD();dbSave();rTableau(document.getElementById('content'));};dd.appendChild(op);});const sp=document.createElement('div');sp.className='cl-dd-sep';dd.appendChild(sp);
 const addEx=document.createElement('div');addEx.className='cl-dd-opt';
 addEx.style.cssText='color:#16A34A;font-weight:700';
 addEx.innerHTML='&#43; Course suppl&eacute;mentaire';
@@ -2263,7 +2495,8 @@ addEx.onclick=e=>{e.stopPropagation();closeDD();
   const dr=G.drivers.find(x=>x.id===did);
   showModal('&#43; Course suppl&eacute;mentaire',(dr?dr.nom:''),
     '<div class="fg"><label class="fl">Client</label><select class="fs" id="ex-cl">'+clOpts+'</select></div>'
-    +'<div class="fg"><label class="fl">Prix (optionnel)</label><input class="fi" type="number" id="ex-prix" placeholder="Ex: 54"></div>',
+    +'<div class="fg"><label class="fl">Prix client (optionnel)</label><input class="fi" type="number" id="ex-prix" placeholder="Ex: 54"></div>'
+    +'<div class="fg"><label class="fl">&#128100; Salaire du chauffeur (optionnel)'+(getSalRate(did)>0?' — tarif habituel '+getSalRate(did).toFixed(2)+' €':'')+'</label><input class="fi" type="number" id="ex-sal" placeholder="'+(getSalRate(did)>0?getSalRate(did).toFixed(2):'Ex: 100')+'"></div>',
     '<button class="btn btn-out btn-sm" onclick="closeMo()">Annuler</button>'
     +'<button class="btn btn-or btn-sm" onclick="confAddExtra()">&#43; Ajouter</button>');
   window._extraDs=ds;window._extraDid=did;window._extraPeriod=period;};
@@ -2282,6 +2515,11 @@ heureOpt.onclick=e=>{e.stopPropagation();closeDD();
     +'<button class="btn btn-or btn-sm" onclick="setAffHeure(\''+ds+'\','+did+',\''+period+'\',document.getElementById(\'th-heure\').value);closeMo();dbSave();rTableau(document.getElementById(\'content\'))">Enregistrer</button>');
 };
 dd.appendChild(heureOpt);
+const prixOpt=document.createElement('div');prixOpt.className='cl-dd-opt';
+prixOpt.style.cssText='color:#7C3AED;font-weight:700';
+prixOpt.innerHTML='&#128181; Prix de la course (client / salaire)';
+prixOpt.onclick=e=>{e.stopPropagation();closeDD();openPrixTour(ds,did,period);};
+dd.appendChild(prixOpt);
 const sp2=document.createElement('div');sp2.className='cl-dd-sep';dd.appendChild(sp2);
 const dl=document.createElement('div');dl.className='cl-dd-del';dl.innerHTML='&#10005; Retirer';dl.onclick=e=>{e.stopPropagation();delAff(ds,did,period);closeDD();dbSave();rTableau(document.getElementById('content'));};dd.appendChild(dl);anchor.style.position='relative';anchor.appendChild(dd);regDD(dd);}
 
@@ -2289,11 +2527,16 @@ function confAddExtra(){
   const ds=window._extraDs;const did=window._extraDid;if(!ds||!did)return;
   const period=window._extraPeriod||'AM';
   const clId=document.getElementById('ex-cl').value;
-  const prix=parseFloat(document.getElementById('ex-prix').value)||null;
+  const _pr=document.getElementById('ex-prix').value.trim().replace(',','.');
+  const prix=_pr===''||isNaN(parseFloat(_pr))?null:parseFloat(_pr);
+  const _sr=(document.getElementById('ex-sal')||{value:''}).value.trim().replace(',','.');
+  const prixSal=_sr===''||isNaN(parseFloat(_sr))||parseFloat(_sr)===getSalRate(did)?null:parseFloat(_sr);
   const cl=G.clients.find(x=>x.id===clId);
   if(!G.affExtra)G.affExtra={};
   const key=ds+'_'+did;if(!G.affExtra[key])G.affExtra[key]=[];
-  G.affExtra[key].push({clientId:clId,label:cl?cl.nom:clId,prix,note:'',ts:nowTs(),period});
+  const _exItem={clientId:clId,label:cl?cl.nom:clId,prix,note:'',ts:nowTs(),period};
+  if(prixSal!==null)_exItem.prixSal=prixSal;
+  G.affExtra[key].push(_exItem);
   closeMo();dbSave();rTableau(document.getElementById('content'));
   toast('Course supplémentaire ajoutée ✓');
 }
@@ -4489,6 +4732,10 @@ function waAll(){
 // PAGE TARIFS
 // ═══════════════════════════════════════════════════════════════════════════
 function rTarifs(c){
+  // Après une modification de prix, on reste au même endroit du tableau au lieu de remonter tout en haut
+  const _keep=!!window._keepTarifScroll;window._keepTarifScroll=false;
+  const _pv=_keep?c.querySelector('.tbl-vscroll'):null,_po=_keep?c.querySelector('.tbl-outer'):null;
+  const _prevTop=_pv?_pv.scrollTop:0,_prevLeft=_po?_po.scrollLeft:0;
   const y=G.y,m=G.m,MM=String(m+1).padStart(2,'0');
   const dim=new Date(y,m+1,0).getDate();
   if(!G.tarifs)G.tarifs={};
@@ -4521,20 +4768,38 @@ function rTarifs(c){
     const extras=getAffExtra(ds,driverId).filter(e=>e.clientId===clientId);
     return {normal, extras};
   }
-  function getTarifJour(driverId, ds){
+  // Prix effectif d'une tournée principale (matin/après-midi) : prix manuel s'il existe, sinon tarif standard du client
+  function prixTourMain(ds,driverId,period,clientId){
+    const t=parseFloat(G.tarifs[clientId])||0;
+    const e=(G.affPrix||{})[ds+'_'+driverId+(period==='PM'?'_PM':'')];
+    return (e&&e.clientId===clientId&&e.prix!=null)?e.prix:t;
+  }
+  function hasPrixCustomMain(ds,driverId,period,clientId){
+    const e=(G.affPrix||{})[ds+'_'+driverId+(period==='PM'?'_PM':'')];
+    return !!(e&&e.clientId===clientId&&e.prix!=null&&e.prix!==(parseFloat(G.tarifs[clientId])||0));
+  }
+  // Course supplémentaire : prix saisi, sinon tarif du client +20 %
+  function prixTourExtra(ex){
+    const t=parseFloat(G.tarifs[ex.clientId])||0;
+    return ex.prix!=null?ex.prix:(t>0?t*1.2:0);
+  }
+  // Montant facturé pour un chauffeur un jour donné (filtre client optionnel) — jours futurs non facturés
+  function montantJour(driverId,ds,filterCl){
     if(ds>todayStrT)return 0;
     let tot=0;
-    G.clients.forEach(cl=>{
-      const t=parseFloat(G.tarifs[cl.id])||0;
-      const detail=getToursDetail(driverId,cl.id,ds);
-      tot+=detail.normal*t;
-      detail.extras.forEach(ex=>{tot+=ex.prix!=null?ex.prix:(t>0?t*1.2:0);});
+    ['AM','PM'].forEach(per=>{
+      const cid=getAff(ds,driverId,per);
+      if(cid&&(!filterCl||cid===filterCl))tot+=prixTourMain(ds,driverId,per,cid);
     });
-    // Extras custom (client inconnu)
-    getAffExtra(ds,driverId).filter(e=>e.clientId==='CUSTOM').forEach(ex=>{
-      tot+=ex.prix||0;
+    getAffExtra(ds,driverId).forEach(ex=>{
+      if(ex.clientId==='CUSTOM'){if(!filterCl)tot+=ex.prix||0;}
+      else if(!filterCl||ex.clientId===filterCl)tot+=prixTourExtra(ex);
     });
     return tot;
+  }
+  function getTarifJour(driverId, ds){
+    if(gStat(ds,driverId)!=='present')return 0;
+    return montantJour(driverId,ds,null);
   }
   function getTarifMois(driverId){
     let tot=0;
@@ -4558,8 +4823,7 @@ function rTarifs(c){
     return n;
   }
   function getCoutSalarialMois(driverId){
-    const tarifSal=parseFloat(G.tarifsSalarie[driverId])||0;
-    return getNbToursTotalMois(driverId)*tarifSal;
+    return getCoutSalarialMoisG(driverId,y,m);
   }
   if(!G.ajustSalaire)G.ajustSalaire={};
   if(!G.acomptes)G.acomptes=[];
@@ -4614,87 +4878,46 @@ function rTarifs(c){
 
     // Cellules chauffeurs
     const cells=planDrvs.map(dr=>{
-      if(isDim)return`<td style="background:#FAFAFA;color:#D1D5DB;font-size:9px;text-align:center">—</td>`;
+      const hasAny=!!(getAff(ds,dr.id,'AM')||getAff(ds,dr.id,'PM')||getAffExtra(ds,dr.id).length);
+      if(isDim&&!hasAny)return`<td style="background:#FAFAFA;color:#D1D5DB;font-size:9px;text-align:center">—</td>`;
       const stat=gStat(ds,dr.id);
       if(stat!=='present')return`<td style="text-align:center"><span style="font-size:9px;color:${SC[stat]};font-weight:700">${stat==='absent'?'abs':stat==='conge'?'cg':'ml'}</span></td>`;
-      // Jour futur : afficher les tournées prévues (comme sur le Tableau) mais SANS prix
-      if(isFuture){
-        if(clFilter){
-          const cidAMf=getAff(ds,dr.id,'AM'),cidPMf=getAff(ds,dr.id,'PM');
-          let chipsF='';
-          if(cidAMf===clFilter){const cl=G.clients.find(x=>x.id===cidAMf);chipsF+=`<div style="background:${cl.color};color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">${cl.id}</div>`;}
-          if(cidPMf===clFilter){const cl=G.clients.find(x=>x.id===cidPMf);chipsF+=`<div style="background:${cl.color};color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">${cl.id}</div>`;}
-          return chipsF?`<td style="padding:2px 3px;background:#FAFAFA">${chipsF}</td>`:`<td style="text-align:center;background:#FAFAFA"><span style="color:#E5E7EB;font-size:9px">—</span></td>`;
-        }
-        const cidAMf=getAff(ds,dr.id,'AM'),cidPMf=getAff(ds,dr.id,'PM');
-        const clAMf=cidAMf?G.clients.find(x=>x.id===cidAMf):null;
-        const clPMf=cidPMf?G.clients.find(x=>x.id===cidPMf):null;
-        let chipsF='';
-        if(clAMf)chipsF+=`<div style="background:${clAMf.color};color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">${clAMf.id}</div>`;
-        if(clPMf)chipsF+=`<div style="background:${clPMf.color};color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">${clPMf.id}</div>`;
-        getAffExtra(ds,dr.id).forEach(e=>{
-          const ecl=G.clients.find(x=>x.id===e.clientId);
-          chipsF+=`<div style="background:#9CA3AF;color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">+${ecl?ecl.id:(e.label||'?')}</div>`;
-        });
-        return chipsF?`<td style="padding:2px 3px;background:#FAFAFA">${chipsF}</td>`:`<td style="text-align:center;background:#FAFAFA"><span style="color:#E5E7EB;font-size:9px">—</span></td>`;
-      }
-      // Calculer les tournées et le montant selon le filtre
-      let chips='',montant=0;
-      // Tournées clients connus
-      G.clients.forEach(cl=>{
-        if(clFilter&&cl.id!==clFilter)return;
-        const detail=getToursDetail(dr.id,cl.id,ds);
-        if(detail.normal===0&&detail.extras.length===0)return;
-        const t=parseFloat(G.tarifs[cl.id])||0;
-        // Tournée normale : une case par tournée (AM et PM affichées séparément)
-        const amMatch=getAff(ds,dr.id,'AM')===cl.id;
-        const pmMatch=getAff(ds,dr.id,'PM')===cl.id;
-        const addChip=period=>{
-          const affPrixEntry=(G.affPrix||{})[ds+'_'+dr.id+(period==='PM'?'_PM':'')];
-          const prixNormal=(affPrixEntry&&affPrixEntry.clientId===cl.id&&affPrixEntry.prix!=null)?affPrixEntry.prix:t;
-          montant+=prixNormal;
-          chips+=`<div style="background:${cl.color};color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">${cl.id}${prixNormal>0?' '+prixNormal.toFixed(0)+'€':''}</div>`;
-        };
-        if(amMatch)addChip('AM');
-        if(pmMatch)addChip('PM');
-        // Extra client connu : chip orange "+FO XX€"
-        detail.extras.forEach(ex=>{
-          const prixExtra=ex.prix!=null?ex.prix:(t>0?t*1.2:0);
-          montant+=prixExtra;
-          const prixLbl=prixExtra>0?' '+prixExtra.toFixed(0)+'€':'';
-          chips+=`<div style="background:#16A34A;color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">+${cl.id}${prixLbl}</div>`;
-        });
+      const mkChip=(color,txt,onclk,future,isExtra)=>`<div onclick="${onclk}" title="Cliquer pour modifier le prix de cette course" style="cursor:pointer;white-space:nowrap;overflow:hidden;background:${color};color:#fff;${future?'opacity:.6;':''}border-radius:3px;font-size:8px;font-weight:700;padding:1px 3px;margin-bottom:1px;text-align:center;${isExtra?'outline:1px dashed rgba(255,255,255,.85);outline-offset:-2px;':''}">${txt}</div>`;
+      let chips='';
+      ['AM','PM'].forEach(per=>{
+        const cid=getAff(ds,dr.id,per);
+        if(!cid||(clFilter&&cid!==clFilter))return;
+        const cl=G.clients.find(x=>x.id===cid);if(!cl)return;
+        const p=prixTourMain(ds,dr.id,per,cid);
+        const cust=hasPrixCustomMain(ds,dr.id,per,cid);
+        // Jour futur : pas de prix standard (non facturé), mais un prix saisi à la main reste visible
+        const txt=isFuture?(cust?cl.id+' '+p.toFixed(0)+'€<span style="font-size:7px;margin-left:1px">&#9998;</span>':cl.id):(cl.id+(p>0?' '+p.toFixed(0)+'€':'')+(cust?'<span style="font-size:7px;margin-left:1px">&#9998;</span>':''));
+        chips+=mkChip(cl.color,txt,`openPrixTour('${ds}',${dr.id},'${per}')`,isFuture,false);
       });
-      // Extras CUSTOM (client non listé) — toujours affichés (pas de filtre client)
-      if(!clFilter){
-        getAffExtra(ds,dr.id).filter(e=>e.clientId==='CUSTOM').forEach(ex=>{
-          const prixExtra=ex.prix||0;
-          montant+=prixExtra;
-          const prixLbl=prixExtra>0?' '+prixExtra.toFixed(0)+'€':'';
-          chips+=`<div style="background:#16A34A;color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px;text-align:center">+${ex.label||'?'}${prixLbl}</div>`;
-        });
-      }
-      if(!chips)return`<td style="text-align:center"><span style="color:#E5E7EB;font-size:9px">—</span></td>`;
-      return`<td style="padding:2px 3px">${chips}</td>`;
+      getAffExtra(ds,dr.id).forEach((ex,xi)=>{
+        let color,label,p,hasP;
+        if(ex.clientId==='CUSTOM'){
+          if(clFilter)return;
+          color='#6B7280';label='+'+(ex.label||'?');p=ex.prix||0;hasP=ex.prix!=null;
+        } else {
+          if(clFilter&&ex.clientId!==clFilter)return;
+          const cl=G.clients.find(x=>x.id===ex.clientId);if(!cl)return;
+          color=cl.color;label='+'+cl.id;p=prixTourExtra(ex);hasP=ex.prix!=null;
+        }
+        const txt=isFuture?(hasP?label+' '+p.toFixed(0)+'€<span style="font-size:7px;margin-left:1px">&#9998;</span>':label):(label+(p>0?' '+p.toFixed(0)+'€':''));
+        chips+=mkChip(color,txt,`openPrixTour('${ds}',${dr.id},'X',${xi})`,isFuture,true);
+      });
+      if(!chips)return isFuture?`<td style="text-align:center;background:#FAFAFA"><span style="color:#E5E7EB;font-size:9px">—</span></td>`:`<td style="text-align:center"><span style="color:#E5E7EB;font-size:9px">—</span></td>`;
+      return`<td style="padding:2px 3px${isFuture?';background:#FAFAFA':''}">${chips}</td>`;
     }).join('');
 
-    // Colonne total jour
+    // Colonne total jour (même règle que les cases : seuls les chauffeurs "présents" comptent)
     let totalJour=0;
     planDrvs.forEach(dr=>{
-      if(isDim||gStat(ds,dr.id)!=='present')return;
-      G.clients.forEach(cl=>{
-        if(clFilter&&cl.id!==clFilter)return;
-        const t=parseFloat(G.tarifs[cl.id])||0;
-        const det=getToursDetail(dr.id,cl.id,ds);
-        totalJour+=det.normal*t;
-        det.extras.forEach(ex=>{totalJour+=ex.prix!=null?ex.prix:(t>0?t*1.2:0);});
-      });
-      // Extras CUSTOM
-      if(!clFilter){
-        getAffExtra(ds,dr.id).filter(e=>e.clientId==='CUSTOM').forEach(ex=>{totalJour+=ex.prix||0;});
-      }
+      if(gStat(ds,dr.id)!=='present')return;
+      totalJour+=montantJour(dr.id,ds,clFilter);
     });
-    const totalCell=isDim?`<td></td>`:totalJour>0
+    const totalCell=totalJour>0
       ?`<td style="text-align:right;font-weight:700;font-size:11px;color:#16A34A;white-space:nowrap;padding-right:6px">${totalJour.toFixed(2)}€</td>`
       :`<td></td>`;
 
@@ -4706,31 +4929,18 @@ function rTarifs(c){
     </tr>`;
   }
 
-  // ── Ligne totaux par chauffeur ────────────────────────────────────────────
+  // ── Ligne totaux par chauffeur (mêmes règles que les cases affichées) ───────
+  let totalGeneral=0;
   const totParChauf=planDrvs.map(dr=>{
     let tot=0;
     for(let d=1;d<=dim;d++){
       const ds=y+'-'+MM+'-'+String(d).padStart(2,'0');
-      G.clients.forEach(cl=>{
-        if(clFilter&&cl.id!==clFilter)return;
-        const t=parseFloat(G.tarifs[cl.id])||0;
-        tot+=getTours(dr.id,cl.id,ds)*t;
-      });
+      if(gStat(ds,dr.id)!=='present')continue;
+      tot+=montantJour(dr.id,ds,clFilter);
     }
+    totalGeneral+=tot;
     return`<th style="padding:6px 3px;text-align:center;font-size:10px;font-weight:700;color:${tot>0?'#16A34A':'#9CA3AF'}">${tot>0?tot.toFixed(0)+'€':'—'}</th>`;
   }).join('');
-  // Total général
-  let totalGeneral=0;
-  planDrvs.forEach(dr=>{
-    for(let d=1;d<=dim;d++){
-      const ds=y+'-'+MM+'-'+String(d).padStart(2,'0');
-      G.clients.forEach(cl=>{
-        if(clFilter&&cl.id!==clFilter)return;
-        const t=parseFloat(G.tarifs[cl.id])||0;
-        totalGeneral+=getTours(dr.id,cl.id,ds)*t;
-      });
-    }
-  });
   // Total salarial général (coût de base + ajustements manuels)
   let totalSalarial=0,totalAjust=0,totalAcomptes=0;
   planDrvs.forEach(dr=>{
@@ -4780,38 +4990,39 @@ function rTarifs(c){
     }
     if(sem&&d===sem.fin)semIdxSal++;
     const cellsSal=planDrvs.map(dr=>{
-      if(isDim)return`<td style="background:#FAFAFA;color:#D1D5DB;font-size:9px;text-align:center">—</td>`;
+      if(isDim&&!(getAff(ds,dr.id,'AM')||getAff(ds,dr.id,'PM')||getAffExtra(ds,dr.id).length))return`<td style="background:#FAFAFA;color:#D1D5DB;font-size:9px;text-align:center">—</td>`;
       const statF=gStat(ds,dr.id);
       if(isFutureSal){
         if(statF!=='present')return`<td style="text-align:center"><span style="font-size:9px;color:${SC[statF]};font-weight:700">${statF==='absent'?'abs':statF==='conge'?'cg':'ml'}</span></td>`;
-        const cidAMf=getAff(ds,dr.id,'AM'),cidPMf=getAff(ds,dr.id,'PM');
-        const clAMf=cidAMf?G.clients.find(x=>x.id===cidAMf):null;
-        const clPMf=cidPMf?G.clients.find(x=>x.id===cidPMf):null;
+        const mkF=(color,label,custTxt,onclk,isExtra)=>`<div onclick="${onclk}" title="Cliquer pour modifier le prix de cette course" style="cursor:pointer;white-space:nowrap;overflow:hidden;background:${color};color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 3px;margin-bottom:1px;${isExtra?'outline:1px dashed rgba(255,255,255,.85);outline-offset:-2px;':''}">${label}${custTxt}</div>`;
+        const pen='<span style="font-size:7px;margin-left:1px">&#9998;</span>';
         let chipsF='';
-        if(clAMf)chipsF+=`<div style="background:${clAMf.color};color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px">${clAMf.id}</div>`;
-        if(clPMf)chipsF+=`<div style="background:${clPMf.color};color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px">${clPMf.id}</div>`;
-        getAffExtra(ds,dr.id).forEach(e=>{
+        ['AM','PM'].forEach(per=>{
+          const cid=getAff(ds,dr.id,per),cl=cid?G.clients.find(x=>x.id===cid):null;if(!cl)return;
+          chipsF+=mkF(cl.color,cl.id,hasSalCustomMain(ds,dr.id,per)?' '+getSalTourMain(ds,dr.id,per).toFixed(0)+'€'+pen:'',`openPrixTour('${ds}',${dr.id},'${per}',null,'sal')`,false);
+        });
+        getAffExtra(ds,dr.id).forEach((e,xi)=>{
           const ecl=G.clients.find(x=>x.id===e.clientId);
-          chipsF+=`<div style="background:#9CA3AF;color:#fff;opacity:.6;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px">+${ecl?ecl.id:(e.label||'?')}</div>`;
+          chipsF+=mkF(ecl?ecl.color:'#6B7280','+'+(ecl?ecl.id:(e.label||'?')),hasSalCustomExtra(dr.id,e)?' '+getSalTourExtra(dr.id,e).toFixed(0)+'€'+pen:'',`openPrixTour('${ds}',${dr.id},'X',${xi},'sal')`,true);
         });
         return chipsF?`<td style="text-align:center;padding:3px;background:#FAFAFA">${chipsF}</td>`:`<td style="text-align:center;background:#FAFAFA"><span style="color:#E5E7EB;font-size:9px">—</span></td>`;
       }
       const stat=gStat(ds,dr.id);
       if(stat!=='present')return`<td style="text-align:center"><span style="font-size:9px;color:${SC[stat]};font-weight:700">${stat==='absent'?'abs':stat==='conge'?'cg':'ml'}</span></td>`;
-      const tarifSal=parseFloat(G.tarifsSalarie[dr.id])||0;
-      // Chips clients (AM / PM / extras) — montant affiché directement sur le chip
+      // Chips clients (AM / PM / extras) — rémunération affichée directement sur le chip, cliquable pour la modifier
+      const pen='<span style="font-size:7px;margin-left:1px">&#9998;</span>';
+      const mkS=(color,label,amount,cust,onclk,isExtra)=>`<div onclick="${onclk}" title="Cliquer pour modifier le prix de cette course" style="cursor:pointer;white-space:nowrap;overflow:hidden;background:${color};color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 3px;margin-bottom:1px;${isExtra?'outline:1px dashed rgba(255,255,255,.85);outline-offset:-2px;':''}">${label}${amount>0?' '+amount.toFixed(0)+'€':''}${cust?pen:''}</div>`;
       let chipsCl='';
       const cidAM=getAff(ds,dr.id,'AM'),clAM=cidAM?G.clients.find(x=>x.id===cidAM):null;
       const cidPM=getAff(ds,dr.id,'PM'),clPM=cidPM?G.clients.find(x=>x.id===cidPM):null;
-      const montLbl=tarifSal>0?' '+tarifSal.toFixed(0)+'€':'';
-      if(clAM)chipsCl+=`<div style="background:${clAM.color};color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px">${clAM.id}${montLbl}</div>`;
-      if(clPM)chipsCl+=`<div style="background:${clPM.color};color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px">${clPM.id}${montLbl}</div>`;
-      getAffExtra(ds,dr.id).forEach(e=>{
+      if(clAM)chipsCl+=mkS(clAM.color,clAM.id,getSalTourMain(ds,dr.id,'AM'),hasSalCustomMain(ds,dr.id,'AM'),`openPrixTour('${ds}',${dr.id},'AM',null,'sal')`,false);
+      if(clPM)chipsCl+=mkS(clPM.color,clPM.id,getSalTourMain(ds,dr.id,'PM'),hasSalCustomMain(ds,dr.id,'PM'),`openPrixTour('${ds}',${dr.id},'PM',null,'sal')`,false);
+      getAffExtra(ds,dr.id).forEach((e,xi)=>{
         const ecl=G.clients.find(x=>x.id===e.clientId);
-        chipsCl+=`<div style="background:#9CA3AF;color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-bottom:1px">+${ecl?ecl.id:(e.label||'?')}${montLbl}</div>`;
+        chipsCl+=mkS(ecl?ecl.color:'#6B7280','+'+(ecl?ecl.id:(e.label||'?')),getSalTourExtra(dr.id,e),hasSalCustomExtra(dr.id,e),`openPrixTour('${ds}',${dr.id},'X',${xi},'sal')`,true);
       });
       let n=(clAM?1:0)+(clPM?1:0)+getAffExtra(ds,dr.id).length;
-      const cout=n*tarifSal;
+      const cout=getSalaireJourG(dr.id,ds);
       // Ajustements manuels (heures sup, primes, retenues...)
       const ajusts=getAjustJour(ds,dr.id);
       const chipsAjust=ajusts.map((a,ai)=>`<div onclick="delAjustSalaire('${ds}',${dr.id},${ai})" title="Cliquer pour supprimer" style="cursor:pointer;background:${a.montant>=0?'#DCFCE7':'#FEE2E2'};color:${a.montant>=0?'#166534':'#DC2626'};border-radius:3px;font-size:8px;font-weight:700;padding:1px 4px;margin-top:1px">${a.montant>=0?'+':''}${a.montant}€${a.label?' '+a.label:''} ×</div>`).join('');
@@ -4836,15 +5047,11 @@ function rTarifs(c){
     // Total jour salarial
     let totalJourSal=0;
     if(!isFutureSal)planDrvs.forEach(dr=>{
-      if(isDim||gStat(ds,dr.id)!=='present')return;
-      let n=0;
-      if(getAff(ds,dr.id,'AM'))n++;
-      if(getAff(ds,dr.id,'PM'))n++;
-      n+=getAffExtra(ds,dr.id).length;
-      totalJourSal+=n*(parseFloat(G.tarifsSalarie[dr.id])||0);
+      if(gStat(ds,dr.id)!=='present')return;
+      totalJourSal+=getSalaireJourG(dr.id,ds);
       getAjustJour(ds,dr.id).forEach(a=>{totalJourSal+=a.montant;});
     });
-    const totalCellSal=isDim?`<td></td>`:totalJourSal>0
+    const totalCellSal=totalJourSal>0
       ?`<td style="text-align:right;font-weight:700;font-size:11px;color:#166534;white-space:nowrap;padding-right:6px">${totalJourSal.toFixed(2)}€</td>`
       :`<td></td>`;
     rowsSal+=`<tr style="border-bottom:1px solid #F3F4F6">
@@ -4930,7 +5137,9 @@ function rTarifs(c){
       const top=vscroll.getBoundingClientRect().top;
       const avail=Math.max(240,window.innerHeight-top-16);
       vscroll.style.maxHeight=avail+'px';
+      if(_keep)vscroll.scrollTop=_prevTop;
     }
+    if(_keep){const o=c.querySelector('.tbl-outer');if(o)o.scrollLeft=_prevLeft;}
     if(theadRow){
       [...theadRow.children].forEach(th=>{th.style.position='sticky';th.style.top='0px';th.style.zIndex='15';});
     }
@@ -5446,7 +5655,7 @@ function rStats(c){
       const cl2=aff2?G.clients.find(x=>x.id===aff2):null;
       const affPM2=getAff(ds2,d.id,'PM');
       const clPM2=affPM2?G.clients.find(x=>x.id===affPM2):null;
-      const tarifSalJ0=ds2>localTodayStr()?0:parseFloat((G.tarifsSalarie||{})[d.id])||0;
+      const tarifSalJ0=ds2>localTodayStr()?0:getSalTourMain(ds2,d.id,'PM');
       const montSuffix0=tarifSalJ0>0?' <span style="opacity:.85">'+tarifSalJ0.toFixed(0)+'€</span>':'';
       const pmChip=clPM2?'<div style="background:'+clPM2.color+';color:#fff;border-radius:3px;font-size:8px;font-weight:700;padding:1px 3px;margin-top:1px;opacity:.9">'+clPM2.id+montSuffix0+'</div>':'';
       const hasSwap=(G.vehSwaps||[]).some(s=>s.date===ds2&&(s.d1===d.id||s.d2===d.id));
@@ -5466,7 +5675,7 @@ function rStats(c){
       if(stat2==='absent')  return '<td style="text-align:center;background:rgba(239,68,68,.12);padding:3px"><span style="font-size:9px;color:#DC2626;font-weight:700">ABS</span></td>';
       // Montant salarial + ajustements + acomptes du jour (affichés sur toutes les cases, comme sur Tarifs) — sauf jour futur
       const isFutureJ=ds2>localTodayStr();
-      const tarifSalJ=isFutureJ?0:parseFloat((G.tarifsSalarie||{})[d.id])||0;
+      const tarifSalJ=isFutureJ?0:getSalTourMain(ds2,d.id,'AM');
       const ajustsJ=isFutureJ?[]:((G.ajustSalaire||{})[ds2+'_'+d.id])||[];
       const acomptesJ=isFutureJ?[]:(G.retenues||[]).filter(a=>a.driverId===d.id&&a.date===ds2);
       const montSuffix=tarifSalJ>0?' <span style="opacity:.85">'+tarifSalJ.toFixed(0)+'€</span>':'';
@@ -5757,10 +5966,10 @@ function rStats(c){
       }
       // Montant salarial + ajustements + acomptes du jour (comme sur Tarifs/Vue Mois)
       if(!isFutur){
-        const tarifSalC=parseFloat((G.tarifsSalarie||{})[d.id])||0;
         const nToursC=(getAff(ds2,d.id,'AM')?1:0)+(getAff(ds2,d.id,'PM')?1:0)+getAffExtra(ds2,d.id).length;
-        if(tarifSalC>0&&nToursC>0){
-          content+='<div style="font-size:8px;color:#16A34A;font-weight:700;margin-top:1px">'+(nToursC*tarifSalC).toFixed(0)+'€</div>';
+        const salJC=getSalaireJourG(d.id,ds2);
+        if(salJC>0&&nToursC>0){
+          content+='<div style="font-size:8px;color:#16A34A;font-weight:700;margin-top:1px">'+salJC.toFixed(0)+'€</div>';
         }
         const ajustsC=((G.ajustSalaire||{})[ds2+'_'+d.id])||[];
         ajustsC.forEach((a,ai)=>{
